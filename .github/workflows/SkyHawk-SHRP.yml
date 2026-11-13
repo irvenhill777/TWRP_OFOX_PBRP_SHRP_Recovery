@@ -1,207 +1,243 @@
-name: SkyHawk [SHRP]
+
+name: SkyHawk SHRP - Moto G Stylus 5G 2024
 
 on:
   workflow_dispatch:
     inputs:
       MANIFEST:
-        description: 'SHRP Manifest (For old SHRP manifest, use v3_9.0, v3_11.0)'
+        description: SHRP Manifest
         required: true
-        default: 'https://github.com/SHRP-Reborn/manifest.git'
+        default: https://github.com/SHRP-Reborn/manifest.git
+
       MANIFEST_BRANCH:
-        description: 'SHRP Manifest Branch'
+        description: SHRP Manifest Branch
         required: true
-        default: ''
         type: choice
+        default: shrp-12.1
         options:
-        - shrp-12.1
-        - shrp-9.0
-        - v3_11.0
-        - v3_9.0
+          - shrp-12.1
+
       DEVICE_TREE:
-        description: 'Custom Recovery Tree' # Your already made Device Tree for TWRP
+        description: Boston Device Tree
         required: true
-        default: 'https://github.com/mlm-games/twrp_lenovo_7305x_m7_mt8765_P' 
+        default: https://github.com/PizzaG/android_device_motorola_boston.git
+
       DEVICE_TREE_BRANCH:
-        description: 'Custom Recovery Tree Branch' # Your Device Tree Branch, make sure it's right.
+        description: Boston Device Tree Branch
         required: true
-        default: 'shrp-9.0'
+        default: TWRP
+
       DEVICE_PATH:
-        description: 'Specify your Device Path' # As is, just like your DEVICE_PATH in your BoardConfig.mk
+        description: Device Tree Location
         required: true
-        default: 'device/lenovo/mt8765_P'
+        default: device/motorola/boston
+
       DEVICE_NAME:
-        description: 'Specify your Device Codename' # As is, just like your PRODUCT_DEVICE in your device tree.
+        description: Device Codename
         required: true
-        default: 'mt8765_P'
+        default: boston
+
       BUILD_TARGET:
-        description: 'Specify your Build Target' # Pick among boot, recovery and vendor_boot
+        description: Recovery Image Target
         required: true
-        default: 'recovery'
         type: choice
+        default: recovery
         options:
-        - boot
-        - recovery
-        - vendorboot
-      LDCHECK:
-        description: 'Use LDCHECK'
-        required: false
-        default: 'false'
-        type: boolean
-      LDCHECKPATH:
-        description: 'Path of blobs to check' # Use it know what kind of dependencies your missing for decryption blobs.
-        required: true
-        default: 'system/bin/qseecomd'
+          - recovery
 
 jobs:
   build:
-    name: Build SHRP by ${{ github.actor }}
-    runs-on: ubuntu-20.04
-    if: github.event.repository.owner.id == github.event.sender.id
-    env:
-      OUTPUT_DIR: ${{ github.workspace }}/android-recovery/out/target/product
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    name: Build SHRP for Boston
+    runs-on: ubuntu-22.04
+
     permissions:
-      contents: write
+      contents: read
+
+    env:
+      DEVICE: boston
+      DEVICE_PATH: device/motorola/boston
+      OUTPUT_DIR: android-recovery/out/target/product/boston
+
     steps:
-    - name: Check Out
-      uses: actions/checkout@v6
-      
-    - name: Display Inputs
-      run: |
-        echo "Displaying variables/inputs."
-        echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
-        echo "Device Tree: ${{ inputs.DEVICE_TREE }}"
-        echo "Device Branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
-        echo "Build Target: ${{ inputs.BUILD_TARGET }}image"
+      - name: Checkout Builder
+        uses: actions/checkout@v4
 
-    - name: Cleanup
-      uses: rokibhasansagar/slimhub_actions@main
-      
-    - name: Set Swap Space
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 12
+      - name: Display Build Information
+        run: |
+          echo "================================"
+          echo "Device: Moto G Stylus 5G 2024"
+          echo "Codename: boston"
+          echo "Model: XT2419-1"
+          echo "Manifest: ${{ inputs.MANIFEST }}"
+          echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
+          echo "Device Tree: ${{ inputs.DEVICE_TREE }}"
+          echo "Device Branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
+          echo "================================"
 
-    - name: Check Manifest Branch
-      run: |
-        if [ ${{ inputs.MANIFEST_BRANCH }} == 'v3_11.0' ] || [ ${{ inputs.MANIFEST_BRANCH }} == 'shrp-12.1' ]; then
-            echo "CHECK_LEGACY_BRANCH=false" >> $GITHUB_ENV
-        else
-            echo "CHECK_LEGACY_BRANCH=true" >> $GITHUB_ENV
-        fi
+      - name: Free Disk Space
+        uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Prepare the environment
-      run: |
-        sudo apt update && sudo apt -y upgrade && sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libtinfo5 libgflags-dev libncurses5 python3
+      - name: Setup Swap
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
 
-    - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@v1.2
-      with:
-        max-size: "10G"
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            git-lfs \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            libelf-dev \
+            liblz4-tool \
+            libncurses-dev \
+            libssl-dev \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            python3 \
+            python-is-python3 \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            unzip \
+            wget \
+            zip \
+            zlib1g-dev
 
-    - name: Install OpenJDK
-      uses: actions/setup-java@v5
-      with:
-        distribution: 'zulu'
-        java-version: '8'
-        
-    - name: Install Git-Repo
-      run: |
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
 
-    - name: Initialize Repo
-      run: |
-        mkdir android-recovery
-        cd android-recovery
-        git config --global user.name "${{ github.actor }}"
-        git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-        repo init --depth=1 -u ${{ inputs.MANIFEST }} -b ${{ inputs.MANIFEST_BRANCH }}
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: shrp-boston
+          max-size: 10G
 
-    - name: Repo Sync
-      run: |
-        cd android-recovery
-        repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-      
-    - name: Clone Device Tree
-      run: |
-        cd android-recovery
-        git clone ${{ inputs.DEVICE_TREE }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
-        cd ${{ inputs.DEVICE_PATH }}
-        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+      - name: Install Repo Tool
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fL \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
-    - name: Check Build Makefile
-      run: |
-        cd android-recovery
-        if [ -f ${{ inputs.DEVICE_PATH }}/twrp_${{ inputs.DEVICE_NAME}}.mk ]; then
-            echo "DEVICE_MAKEFILE=twrp_${{ inputs.DEVICE_NAME }}" >> $GITHUB_ENV
-        elif [ -f ${{ inputs.DEVICE_PATH }}/omni_${{ inputs.DEVICE_NAME}}.mk ]; then
-            echo "DEVICE_MAKEFILE=omni_${{ inputs.DEVICE_NAME }}" >> $GITHUB_ENV
-        else
-            echo "No recovery makefile file found!"
-        fi
-      continue-on-error: true
+      - name: Initialize SHRP Source
+        run: |
+          mkdir -p android-recovery
+          cd android-recovery
 
-    - name: Installing python2 for legacy builds
-      if: env.CHECK_LEGACY_BRANCH == 'true'
-      run: |
-        sudo apt-get install python2 python-is-python2
+          git config --global user.name "Boston SHRP Builder"
+          git config --global user.email "boston-builder@users.noreply.github.com"
 
-    - name: Building SkyHawk
-      run: |
-        cd android-recovery
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ env.DEVICE_MAKEFILE }}-eng && make clean && mka ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
-        echo "Done building your ${{ inputs.BUILD_TARGET }}.img"
+          repo init \
+            --depth=1 \
+            -u "${{ inputs.MANIFEST }}" \
+            -b "${{ inputs.MANIFEST_BRANCH }}"
 
-    - name: Check if the recovery exists
-      if: always()
-      run: |
-        img_file=$(find "${{ env.OUTPUT_DIR }}" -name "${{ inputs.BUILD_TARGET }}*.img" -print -quit)
-        zip_file=$(find "${{ env.OUTPUT_DIR }}" -name "SHRP*.zip" -print -quit)
-        if [ -f "$img_file" ]; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum "$img_file" | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        else
-            echo "Recovery out directory is empty."
-        fi
-        if [ -f "$zip_file" ]; then
-            echo "CHECK_ZIP_IS_OK=true" >> $GITHUB_ENV
-            echo "MD5_ZIP=$(md5sum "$zip_file" | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        else
-            echo "::warning::The zip file isn't present but make sure the image is from only after 100% completion in build stage"
-        fi
+      - name: Sync SHRP Source
+        run: |
+          cd android-recovery
 
-    - name: Set Build Date # Output will be use in Release
-      run: |
-        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
-      
-    - name: Upload to Release
-      if: always() && env.CHECK_IMG_IS_OK == 'true'
-      uses: softprops/action-gh-release@master
-      with:
-        files: |
-          ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
-          ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/SHRP*.zip
-          ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/ramdisk*.*
-        name: Unofficial SHRP For ${{ inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Build: ${{ env.MANIFEST_BRANCH }}
-          Device: [Device Tree/Branch](${{ inputs.DEVICE_TREE }}/tree/${{ inputs.DEVICE_TREE_BRANCH }})
-          Commit: Most recent [commit](${{ inputs.DEVICE_TREE }}/commit/${{ env.COMMIT_ID }}) during building.
-        prerelease: true
+          repo sync \
+            -c \
+            -j2 \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags
 
-    - name: Run LDCheck
-      if: inputs.LDCHECK == 'true'
-      run: |
-        cd tools
-        mv -n libneeds ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root/
-        mv -n ldcheck ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root/
-        cd ${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root
-        python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ inputs.LDCHECKPATH }}
-        echo "Done checking missing dependencies. Review, and reconfigure your tree."
-      continue-on-error: true
+      - name: Clone Boston Device Tree
+        run: |
+          cd android-recovery
+
+          mkdir -p device/motorola
+
+          git clone \
+            --depth=1 \
+            -b "${{ inputs.DEVICE_TREE_BRANCH }}" \
+            "${{ inputs.DEVICE_TREE }}" \
+            device/motorola/boston
+
+          cd device/motorola/boston
+
+          echo "DEVICE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Verify Boston Device Tree
+        run: |
+          cd android-recovery
+
+          test -f device/motorola/boston/BoardConfig.mk
+          test -f device/motorola/boston/twrp_boston.mk
+          test -f device/motorola/boston/AndroidProducts.mk
+
+          echo "Boston device tree verified."
+
+      - name: Setup Build Environment
+        run: |
+          cd android-recovery
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+
+          source build/envsetup.sh
+
+          lunch twrp_boston-eng
+
+      - name: Build SkyHawk Recovery
+        run: |
+          cd android-recovery
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export USE_CCACHE=1
+
+          source build/envsetup.sh
+
+          lunch twrp_boston-eng
+
+          mka recoveryimage -j2
+
+      - name: Verify Recovery Image
+        if: always()
+        run: |
+          IMAGE="$OUTPUT_DIR/recovery.img"
+
+          if [ -f "$IMAGE" ]; then
+            echo "BUILD_SUCCESS=true" >> "$GITHUB_ENV"
+
+            echo "Recovery image successfully created."
+
+            md5sum "$IMAGE"
+            ls -lh "$IMAGE"
+          else
+            echo "BUILD_SUCCESS=false" >> "$GITHUB_ENV"
+            echo "::error::Boston recovery image was not found."
+          fi
+
+      - name: Upload Boston Recovery
+        if: success() && env.BUILD_SUCCESS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHRP-Boston-XT2419-1
+          path: |
+            android-recovery/out/target/product/boston/recovery.img
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          
