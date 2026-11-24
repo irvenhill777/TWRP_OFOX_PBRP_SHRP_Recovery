@@ -1,88 +1,97 @@
-
-name: SkyHawk SHRP - Moto G Stylus 5G 2024
+name: SkyHawk SHRP - Google Pixel 6a
 
 on:
   workflow_dispatch:
     inputs:
       MANIFEST:
-        description: SHRP Manifest
+        description: SHRP manifest
         required: true
-        default: https://github.com/SHRP-Reborn/manifest.git
+        default: [github.com](https://github.com/SHRP-Reborn/manifest.git)
 
       MANIFEST_BRANCH:
-        description: SHRP Manifest Branch
+        description: SHRP manifest branch
         required: true
-        type: choice
         default: shrp-12.1
-        options:
-          - shrp-12.1
 
       DEVICE_TREE:
-        description: Boston Device Tree
+        description: Pixel 6a SHRP/TWRP device tree
         required: true
-        default: https://github.com/PizzaG/android_device_motorola_boston.git
+        default: REPLACE_WITH_BLUEJAY_RECOVERY_TREE
 
       DEVICE_TREE_BRANCH:
-        description: Boston Device Tree Branch
+        description: Device tree branch
         required: true
-        default: TWRP
+        default: android-12.1
 
       DEVICE_PATH:
-        description: Device Tree Location
+        description: Device tree destination
         required: true
-        default: device/motorola/boston
+        default: device/google/bluejay
 
       DEVICE_NAME:
-        description: Device Codename
+        description: Device codename
         required: true
-        default: boston
+        default: bluejay
+
+      DEVICE_MAKEFILE:
+        description: Recovery product makefile
+        required: true
+        default: twrp_bluejay
 
       BUILD_TARGET:
-        description: Recovery Image Target
+        description: Recovery build target
         required: true
         type: choice
-        default: recovery
+        default: boot
         options:
+          - boot
+          - vendorboot
           - recovery
 
 jobs:
   build:
-    name: Build SHRP for Boston
+    name: Build SHRP for Pixel 6a
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
 
     permissions:
       contents: read
 
     env:
-      DEVICE: boston
-      DEVICE_PATH: device/motorola/boston
-      OUTPUT_DIR: android-recovery/out/target/product/boston
+      DEVICE: ${{ inputs.DEVICE_NAME }}
+      DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
+      OUTPUT_DIR: android-recovery/out/target/product/${{ inputs.DEVICE_NAME }}
+      CCACHE_EXEC: /usr/bin/ccache
+      USE_CCACHE: "1"
+      CCACHE_COMPRESS: "1"
+      ALLOW_MISSING_DEPENDENCIES: "true"
 
     steps:
-      - name: Checkout Builder
+      - name: Checkout builder
         uses: actions/checkout@v4
 
-      - name: Display Build Information
+      - name: Display build information
         run: |
           echo "================================"
-          echo "Device: Moto G Stylus 5G 2024"
-          echo "Codename: boston"
-          echo "Model: XT2419-1"
+          echo "Device: Google Pixel 6a"
+          echo "Codename: ${{ inputs.DEVICE_NAME }}"
           echo "Manifest: ${{ inputs.MANIFEST }}"
-          echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
-          echo "Device Tree: ${{ inputs.DEVICE_TREE }}"
-          echo "Device Branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
+          echo "Manifest branch: ${{ inputs.MANIFEST_BRANCH }}"
+          echo "Device tree: ${{ inputs.DEVICE_TREE }}"
+          echo "Device branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
+          echo "Device path: ${{ inputs.DEVICE_PATH }}"
+          echo "Build target: ${{ inputs.BUILD_TARGET }}"
           echo "================================"
 
-      - name: Free Disk Space
+      - name: Free disk space
         uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Setup Swap
+      - name: Set up swap
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 12
 
-      - name: Install Build Dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -119,41 +128,46 @@ jobs:
             zip \
             zlib1g-dev
 
-      - name: Setup Java
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: zulu
-          java-version: '11'
+          java-version: "11"
 
-      - name: Setup Ccache
+      - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: shrp-boston
+          key: shrp-bluejay-${{ inputs.MANIFEST_BRANCH }}
+          restore-keys: |
+            shrp-bluejay-
           max-size: 10G
 
-      - name: Install Repo Tool
+      - name: Install repo tool
         run: |
           mkdir -p "$HOME/bin"
+
           curl -fL \
-            https://storage.googleapis.com/git-repo-downloads/repo \
+            [storage.googleapis.com](https://storage.googleapis.com/git-repo-downloads/repo) \
             -o "$HOME/bin/repo"
+
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Initialize SHRP Source
+      - name: Initialize SHRP source
         run: |
           mkdir -p android-recovery
           cd android-recovery
 
-          git config --global user.name "Boston SHRP Builder"
-          git config --global user.email "boston-builder@users.noreply.github.com"
+          git config --global user.name "Pixel 6a SHRP Builder"
+          git config --global user.email \
+            "bluejay-builder@users.noreply.github.com"
 
           repo init \
             --depth=1 \
             -u "${{ inputs.MANIFEST }}" \
             -b "${{ inputs.MANIFEST_BRANCH }}"
 
-      - name: Sync SHRP Source
+      - name: Sync SHRP source
         run: |
           cd android-recovery
 
@@ -164,41 +178,75 @@ jobs:
             --no-clone-bundle \
             --no-tags
 
-      - name: Clone Boston Device Tree
+      - name: Clone Pixel 6a device tree
         run: |
           cd android-recovery
 
-          mkdir -p device/motorola
+          rm -rf "${{ inputs.DEVICE_PATH }}"
+          mkdir -p "$(dirname "${{ inputs.DEVICE_PATH }}")"
 
           git clone \
             --depth=1 \
+            --single-branch \
             -b "${{ inputs.DEVICE_TREE_BRANCH }}" \
             "${{ inputs.DEVICE_TREE }}" \
-            device/motorola/boston
+            "${{ inputs.DEVICE_PATH }}"
 
-          cd device/motorola/boston
-
+          cd "${{ inputs.DEVICE_PATH }}"
           echo "DEVICE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Verify Boston Device Tree
+      - name: Verify Pixel 6a device tree
+        run: |
+          TREE="android-recovery/${{ inputs.DEVICE_PATH }}"
+
+          test -f "$TREE/BoardConfig.mk"
+          test -f "$TREE/AndroidProducts.mk"
+
+          PRODUCT="${{ inputs.DEVICE_MAKEFILE }}"
+
+          if [ ! -f "$TREE/$PRODUCT.mk" ]; then
+            echo "::error::Missing $TREE/$PRODUCT.mk"
+            echo "Available product makefiles:"
+            find "$TREE" -maxdepth 1 -name "*.mk" -print
+            exit 1
+          fi
+
+          grep -q "$PRODUCT" "$TREE/AndroidProducts.mk" || {
+            echo "::warning::$PRODUCT is not listed literally in AndroidProducts.mk."
+          }
+
+          echo "Pixel 6a device tree verified."
+
+      - name: Set build command
+        run: |
+          case "${{ inputs.BUILD_TARGET }}" in
+            boot)
+              echo "BUILD_COMMAND=bootimage" >> "$GITHUB_ENV"
+              echo "OUTPUT_IMAGE=boot.img" >> "$GITHUB_ENV"
+              ;;
+
+            vendorboot)
+              echo "BUILD_COMMAND=vendorbootimage" >> "$GITHUB_ENV"
+              echo "OUTPUT_IMAGE=vendor_boot.img" >> "$GITHUB_ENV"
+              ;;
+
+            recovery)
+              echo "BUILD_COMMAND=recoveryimage" >> "$GITHUB_ENV"
+              echo "OUTPUT_IMAGE=recovery.img" >> "$GITHUB_ENV"
+              ;;
+
+            *)
+              echo "::error::Unsupported build target."
+              exit 1
+              ;;
+          esac
+
+      - name: Set up build environment
         run: |
           cd android-recovery
-
-          test -f device/motorola/boston/BoardConfig.mk
-          test -f device/motorola/boston/twrp_boston.mk
-          test -f device/motorola/boston/AndroidProducts.mk
-
-          echo "Boston device tree verified."
-
-      - name: Setup Build Environment
-        run: |
-          cd android-recovery
-
-          export ALLOW_MISSING_DEPENDENCIES=true
 
           source build/envsetup.sh
-
-          lunch twrp_boston-eng
+          lunch "${{ inputs.DEVICE_MAKEFILE }}-eng"
 
       - name: Build SkyHawk Recovery
         run: |
@@ -208,36 +256,37 @@ jobs:
           export USE_CCACHE=1
 
           source build/envsetup.sh
+          lunch "${{ inputs.DEVICE_MAKEFILE }}-eng"
 
-          lunch twrp_boston-eng
+          mka "$BUILD_COMMAND" -j2
 
-          mka recoveryimage -j2
-
-      - name: Verify Recovery Image
-        if: always()
+      - name: Verify recovery artifact
         run: |
-          IMAGE="$OUTPUT_DIR/recovery.img"
+          IMAGE="$OUTPUT_DIR/$OUTPUT_IMAGE"
 
-          if [ -f "$IMAGE" ]; then
-            echo "BUILD_SUCCESS=true" >> "$GITHUB_ENV"
-
-            echo "Recovery image successfully created."
-
-            md5sum "$IMAGE"
-            ls -lh "$IMAGE"
-          else
-            echo "BUILD_SUCCESS=false" >> "$GITHUB_ENV"
-            echo "::error::Boston recovery image was not found."
+          if [ ! -f "$IMAGE" ]; then
+            echo "::error::Expected image was not generated: $IMAGE"
+            echo "Images found in output directory:"
+            find "$OUTPUT_DIR" \
+              -maxdepth 1 \
+              -type f \
+              \( -name "*.img" -o -name "*.zip" \) \
+              -print || true
+            exit 1
           fi
 
-      - name: Upload Boston Recovery
-        if: success() && env.BUILD_SUCCESS == 'true'
+          sha256sum "$IMAGE" | tee "$IMAGE.sha256"
+          md5sum "$IMAGE" | tee "$IMAGE.md5"
+          ls -lh "$IMAGE" "$IMAGE.sha256" "$IMAGE.md5"
+
+      - name: Upload Pixel 6a recovery artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SHRP-Boston-XT2419-1
+          name: SHRP-Pixel-6a-bluejay-${{ inputs.BUILD_TARGET }}
           path: |
-            android-recovery/out/target/product/boston/recovery.img
+            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}
+            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}.sha256
+            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}.md5
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
-          
