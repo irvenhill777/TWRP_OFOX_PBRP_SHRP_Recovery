@@ -1,0 +1,269 @@
+
+name: SHRP Recovery - Google Pixel 6a Bluejay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SHRP for Pixel 6a
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    env:
+      DEVICE: bluejay
+      DEVICE_PATH: device/google/bluejay
+      PRODUCT: omni_bluejay
+      MANIFEST_URL: https://github.com/SHRP-Reborn/manifest.git
+      MANIFEST_BRANCH: shrp-12.1
+      DEVICE_TREE_URL: https://github.com/twrpdtgen/android_device_google_bluejay.git
+      DEVICE_TREE_BRANCH: bluejay_beta-user-UpsideDownCake-UPP2.230217.004-9663077-release-keys
+      OUTPUT_DIR: android-recovery/out/target/product/bluejay
+      ALLOW_MISSING_DEPENDENCIES: "true"
+      USE_CCACHE: "1"
+
+    steps:
+      - name: Checkout builder
+        uses: actions/checkout@v4
+
+      - name: Display build configuration
+        run: |
+          echo "=================================="
+          echo "Device: Google Pixel 6a"
+          echo "Codename: bluejay"
+          echo "Product: omni_bluejay"
+          echo "Recovery: SHRP"
+          echo "Manifest branch: shrp-12.1"
+          echo "Build target: bootimage"
+          echo "=================================="
+
+      - name: Free disk space
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Configure swap
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            git-lfs \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            libelf-dev \
+            liblz4-tool \
+            libncurses-dev \
+            libssl-dev \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            python3 \
+            python-is-python3 \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            unzip \
+            wget \
+            zip \
+            zlib1g-dev
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "11"
+
+      - name: Configure ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: bluejay-shrp
+          max-size: 10G
+
+      - name: Install repo tool
+        run: |
+          mkdir -p "$HOME/bin"
+
+          curl -fL \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+
+          chmod +x "$HOME/bin/repo"
+
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize SHRP source
+        run: |
+          mkdir -p android-recovery
+          cd android-recovery
+
+          git config --global user.name "Bluejay SHRP Builder"
+          git config --global user.email \
+            "bluejay-builder@users.noreply.github.com"
+
+          repo init \
+            --depth=1 \
+            -u "$MANIFEST_URL" \
+            -b "$MANIFEST_BRANCH"
+
+      - name: Sync SHRP source
+        run: |
+          cd android-recovery
+
+          repo sync \
+            -c \
+            -j2 \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags
+
+      - name: Clone Pixel 6a device tree
+        run: |
+          cd android-recovery
+
+          rm -rf "$DEVICE_PATH"
+
+          mkdir -p "$(dirname "$DEVICE_PATH")"
+
+          git clone \
+            --depth=1 \
+            --single-branch \
+            -b "$DEVICE_TREE_BRANCH" \
+            "$DEVICE_TREE_URL" \
+            "$DEVICE_PATH"
+
+          cd "$DEVICE_PATH"
+
+          echo "Device tree commit:"
+          git rev-parse HEAD
+
+      - name: Verify Pixel 6a device tree
+        run: |
+          set -e
+
+          TREE="$DEVICE_PATH"
+
+          echo "Checking Pixel 6a device tree..."
+
+          test -f "$TREE/BoardConfig.mk"
+          test -f "$TREE/AndroidProducts.mk"
+          test -f "$TREE/omni_bluejay.mk"
+
+          echo "Checking device codename..."
+
+          grep -q "bluejay" "$TREE/omni_bluejay.mk"
+
+          echo "Checking recovery-as-boot configuration..."
+
+          if ! grep -Eq \
+            '^[[:space:]]*BOARD_USES_RECOVERY_AS_BOOT[[:space:]]*:?=[[:space:]]*true' \
+            "$TREE/BoardConfig.mk"; then
+
+            echo "::error::BOARD_USES_RECOVERY_AS_BOOT is missing or not true."
+            exit 1
+          fi
+
+          echo "Checking product makefile..."
+
+          grep -q "omni_bluejay" "$TREE/AndroidProducts.mk"
+
+          echo "Checking platform..."
+
+          grep -q "gs101" "$TREE/BoardConfig.mk"
+
+          echo "=================================="
+          echo "Pixel 6a configuration verified."
+          echo "Recovery mode: recovery-as-boot"
+          echo "Build product: omni_bluejay"
+          echo "=================================="
+
+      - name: Verify SHRP build environment
+        run: |
+          set -e
+
+          cd android-recovery
+
+          test -f build/envsetup.sh
+
+          if [ ! -d vendor ]; then
+            echo "::error::Vendor source directory is missing."
+            exit 1
+          fi
+
+          echo "SHRP source directory verified."
+
+      - name: Build Pixel 6a SHRP boot image
+        run: |
+          set -e
+
+          cd android-recovery
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export USE_CCACHE=1
+
+          source build/envsetup.sh
+
+          lunch omni_bluejay-eng
+
+          echo "Starting Pixel 6a boot image build..."
+
+          mka bootimage -j2
+
+      - name: Verify recovery image
+        run: |
+          set -e
+
+          IMAGE="$OUTPUT_DIR/boot.img"
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "::error::boot.img was not generated."
+
+            echo "Available image files:"
+            find "$OUTPUT_DIR" \
+              -maxdepth 1 \
+              -type f \
+              -name "*.img" \
+              -print || true
+
+            exit 1
+          fi
+
+          echo "Recovery image generated successfully."
+
+          sha256sum "$IMAGE" | tee "$IMAGE.sha256"
+          md5sum "$IMAGE" | tee "$IMAGE.md5"
+
+          ls -lh \
+            "$IMAGE" \
+            "$IMAGE.sha256" \
+            "$IMAGE.md5"
+
+      - name: Upload Pixel 6a SHRP artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHRP-Pixel-6a-bluejay
+          path: |
+            android-recovery/out/target/product/bluejay/boot.img
+            android-recovery/out/target/product/bluejay/boot.img.sha256
+            android-recovery/out/target/product/bluejay/boot.img.md5
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
