@@ -14,7 +14,7 @@ on:
       DEVICE_TREE:
         description: 'Custom Recovery Tree'
         required: true
-        default: 'https://github.com/Kyros70/android_device_freeyond_m5a_recovery'
+        default: 'https://github.com/Kyros70/android_device_freeyond_m5a-recovery'
       DEVICE_TREE_BRANCH:
         description: 'Custom Recovery Tree Branch (use master if default)'
         required: true
@@ -49,7 +49,7 @@ on:
 jobs:
   build:
     name: Build OFRP by ${{ github.actor }}
-    runs-on: ubuntu-22.04
+    runs-on: namespace-profile-kyros
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,16 +93,18 @@ jobs:
         ./orangefox_sync.sh --branch ${{ inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
       
     - name: Clone Device Tree
+      env:
+        PAT: ${{ secrets.PAT }}
       run: |
+        test -n "$PAT" || { echo "PAT secret is empty"; exit 1; }
         cd ${{ env.ORANGEFOX_ROOT }}
-        git clone "https://${{ secrets.PAT }}@github.com/Kyros70/android_device_freeyond_m5a_recovery" -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
+        git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PAT" | base64 -w0)" clone https://github.com/Kyros70/android_device_freeyond_m5a-recovery -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
         cd ${{ inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
+        
     - name: Apply vibrator FF fallback Patch
       run: |
         set -euo pipefail
-        sudo apt-get install -y patch
         cd "${{ env.ORANGEFOX_ROOT }}/bootable/recovery"
         patch -p1 --fuzz=5 < "${{ env.ORANGEFOX_ROOT }}/${{ inputs.DEVICE_PATH }}/patches/0001-events-cpp-ff-vibrator.patch"
         echo "Patched events.cpp successfully"
@@ -110,7 +112,6 @@ jobs:
     - name: Apply non-blocking vibration patch
       run: |
         set -euo pipefail
-        sudo apt-get install -y patch
         cd "${{ env.ORANGEFOX_ROOT }}/bootable/recovery"
         patch -p1 --fuzz=5 < "${{ env.ORANGEFOX_ROOT }}/${{ inputs.DEVICE_PATH }}/patches/0002-events-cpp-nonblocking-vibrator.patch"
         echo "Patched events.cpp successfully"
@@ -166,12 +167,19 @@ jobs:
             echo "::warning::The zip file isn't present but make sure the image is from only after 100% completion in build stage"
         fi
 
+    - name: Compress image
+      if: env.CHECK_IMG_IS_OK == 'true'
+      run: |
+        cd "${{ env.OUTPUT_DIR }}"
+        xz -9e -T0 -k -v -f -c vendor_boot.img > vendor_boot.img.xz
+
     - name: Upload to Release
       if: env.CHECK_IMG_IS_OK == 'true'
       uses: softprops/action-gh-release@master
       with:
         files: |
           ${{ env.OUTPUT_DIR }}/OrangeFox*.img
+          ${{ env.OUTPUT_DIR }}/vendor_boot.img.xz
           ${{ env.OUTPUT_DIR }}/OrangeFox*.tar
           ${{ env.OUTPUT_DIR }}/OrangeFox*.zip
           ${{ env.OUTPUT_DIR }}/ramdisk-recovery.*

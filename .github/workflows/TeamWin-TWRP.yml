@@ -63,7 +63,7 @@ on:
 jobs:
   build:
     name: Build TWRP by ${{ github.actor }}
-    runs-on: ubuntu-22.04
+    runs-on: namespace-profile-kyros
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,25 +93,26 @@ jobs:
 
     - name: Prepare the environment
       run: |
-        sudo apt update
-        sudo apt -y upgrade
-        
-        # Required for python2 on 22.04
-        sudo add-apt-repository universe
-        
-        # Note: 'python-is-python2' does NOT exist in 22.04. We install the raw binary.
-        sudo apt -y install python2
-        
-        # This is required because there is no package to do it for us anymore.
-        sudo ln -sf /usr/bin/python2 /usr/bin/python
-        
-        sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib \
-        libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev \
-        libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev \
-        lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev \
-        libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev \
-        lzma ncftp qemu-user-static libstdc++-10-dev libtinfo5 libgflags-dev libncurses5
-        
+        sudo add-apt-repository -y universe
+        sudo apt-get update
+        sudo apt-get -y upgrade
+        PKGS="gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libncurses5-dev libsdl1.2-dev libwxgtk3.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libgflags-dev python3 python-is-python3"
+        INSTALL=""
+        for p in $PKGS; do
+            if apt-cache show "$p" > /dev/null 2>&1; then
+                INSTALL="$INSTALL $p"
+            else
+                echo "Skipping $p, not available on this Ubuntu release"
+            fi
+        done
+        sudo apt-get -y install $INSTALL
+        if ! dpkg -s libtinfo5 > /dev/null 2>&1; then
+            sudo sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list.d/jammy-legacy.list'
+            sudo apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/jammy-legacy.list -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0 || true
+            (cd /tmp && apt-get download libtinfo5 libncurses5 && sudo dpkg -i libtinfo5_*.deb libncurses5_*.deb) || echo "::warning::Could not install legacy libtinfo5/libncurses5"
+            sudo rm -f /etc/apt/sources.list.d/jammy-legacy.list
+        fi
+
     - name: Install OpenJDK
       uses: actions/setup-java@v5
       with:
@@ -120,10 +121,10 @@ jobs:
 
     - name: Install Git-Repo
       run: |
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
+        curl -fL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
+        sudo install -m 0755 /tmp/repo /usr/local/bin/repo
+        sudo ln -sf /usr/local/bin/repo /usr/bin/repo
+        repo --version | head -n 3
 
     - name: Initialize Repo
       run: |
@@ -139,9 +140,13 @@ jobs:
         repo sync -j$(nproc --all) --force-sync
       
     - name: Clone Device Tree
+      env:
+        PAT: ${{ secrets.PAT }}
       run: |
+        test -n "$PAT" || { echo "PAT secret is empty"; exit 1; }
         cd android-recovery
-        git clone "https://${{ secrets.PAT }}@github.com/Kyros70/android_device_freeyond_m5a_recovery" -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
+        git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PAT" | base64 -w0)" clone https://github.com/Kyros70/android_device_freeyond_m5a-recovery -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
+        cd ${{ inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
     - name: Apply vibrator FF fallback fix
@@ -161,7 +166,10 @@ jobs:
     - name: Installing python2 for legacy builds
       if: env.CHECK_LEGACY_BRANCH == 'true'
       run: |
-        sudo apt-get install python2 python-is-python2
+        sudo apt-get install -y python2 python-is-python2 || {
+            echo "::error::python2 is not available on this runner image, legacy manifest branches need an ubuntu-22.04 runner"
+            exit 1
+        }
 
     - name: Building Image 
       run: |
@@ -175,6 +183,18 @@ jobs:
       run: |
         echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
       
+    - name: Compress image
+      if: success()
+      run: |
+        cd "android-recovery/out/target/product/${{ inputs.DEVICE_NAME }}"
+        img_file=$(find . -maxdepth 1 -name "vendor_boot.img" -print -quit)
+        [ -n "$img_file" ] || img_file=$(find . -maxdepth 1 -name "*vendor*.img" -print -quit)
+        if [ -n "$img_file" ]; then
+            xz -9e -T0 -k -v -f -c "$img_file" > "${img_file#./}.xz"
+        else
+            echo "::warning::No vendor image found to compress"
+        fi
+
     - name: Upload to Release
       if: success()
       uses: softprops/action-gh-release@master
