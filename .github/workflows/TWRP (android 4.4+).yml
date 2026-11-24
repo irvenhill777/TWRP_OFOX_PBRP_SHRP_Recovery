@@ -1,189 +1,194 @@
-name: Recovery Build TWRP 4.4+ (Ubuntu 18.04)
-permissions:
-  contents: write
+
+name: SHRP Recovery Builder - Pixel 6a Bluejay
+
 on:
   workflow_dispatch:
-    inputs:
-      MANIFEST_URL:
-        description: 'MANIFEST_URL, Works below android 10 with this repo (if want to use SSH keys, use git@github.com:XXXXX)'
-        required: true
-        default: 'https://github.com/mlm-games/platform_manifest_twrp_omni'
-      MANIFEST_BRANCH:
-        description: 'MANIFEST_BRANCH'
-        required: true
-        default: 'twrp-5.1'
-      DEVICE_TREE_URL:
-        description: 'DEVICE_TREE_URL'
-        required: true
-        default: 'https://github.com/zh-xijun/twrp_device_'
-      DEVICE_TREE_BRANCH:
-        description: 'DEVICE_TREE_BRANCH'
-        required: true
-        default: 'twrp-4.4'
-      DEVICE_PATH:
-        description: 'DEVICE_PATH'
-        required: true
-        default: 'device/'
-      DEVICE_NAME:
-        description: 'DEVICE_NAME'
-        required: true
-        default: ''
-      MAKEFILE_NAME:
-        description: 'MAKEFILE_NAME (without including .mk, Example: omni_7304F)'
-        required: true
-        default: 'omni_'
-      LDCHECK:
-        description: 'Use LDCHECK' # I can use only 10 inputs on a workflow file
-        required: false
-        default: 'false'
-        type: boolean
-      LDCHECKPATH:
-        description: 'Path of blobs to check' # Use it know what kind of dependencies your missing for decryption blobs.
-        required: true
-        default: 'system/bin/qseecomd'
-#      COMMON_TREE_URL:
-#        description: 'COMMON_TREE_URL (if no common tree, leave blank)'
-#        required: false
-#      COMMON_PATH:
-#        description: 'COMMON_PATH (if no common tree, leave blank)'
-#        required: false
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/catthehacker/ubuntu:runner-18.04
+    timeout-minutes: 360
+
     env:
-      LC_ALL: "C.UTF-8"
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
-      OUTPUT_DIR: android-recovery/out/target/product
+      DEVICE: bluejay
+      DEVICE_PATH: device/google/bluejay
+      PRODUCT: omni_bluejay
+      OUT_DIR: out/target/product/bluejay
+
+      MANIFEST_URL: https://github.com/SHRP-Reborn/manifest.git
+      MANIFEST_BRANCH: shrp-12.1
+
+      DEVICE_TREE_URL: https://github.com/twrpdtgen/android_device_google_bluejay.git
+      DEVICE_TREE_BRANCH: bluejay_beta-user-UpsideDownCake-UPP2.230217.004-9663077-release-keys
+
+      LC_ALL: C.UTF-8
+      ALLOW_MISSING_DEPENDENCIES: "true"
+
     steps:
-    - name: Display Run Parameters
-      run: |
-        echo "::group::User Environment Variables"
-        echo "Manifest URL: ${{ inputs.MANIFEST_URL }}"
-        echo "Manifest Branch: ${{ inputs.MANIFEST_BRANCH }}"
-        echo "Device Tree URL: ${{ inputs.DEVICE_TREE_URL }}"
-        echo "Device Tree Branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
-        echo "Device Path: ${{ inputs.DEVICE_PATH }}"
-        echo "Device Name: ${{ inputs.DEVICE_NAME }}"
-        echo "Makefile Name: ${{ inputs.MAKEFILE_NAME }}"
-        echo "::endgroup::"
- 
-    - name: Check Out
-      uses: actions/checkout@v6
+      - name: Checkout builder
+        uses: actions/checkout@v4
 
-    # Cleanup The Actions Workspace Using Custom Composite Run Actions
-    - name: Cleanup
-      uses: rokibhasansagar/slimhub_actions@main
-      # That's it! Now use your normal steps
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
 
-    - name: Prepare the environment
-      run: |
-        sudo apt update
-        sudo apt -y upgrade
-        sudo apt install -yq bc bison build-essential curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python bash tmux
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl \
+            flex g++-multilib gcc-multilib git \
+            git-lfs gnupg gperf imagemagick \
+            lib32ncurses-dev lib32z1-dev \
+            liblz4-tool libncurses-dev \
+            libssl-dev libxml2 libxml2-utils \
+            lzop pngcrush rsync schedtool \
+            squashfs-tools xsltproc zip \
+            zlib1g-dev python3 python-is-python3 \
+            openjdk-11-jdk
 
-    - name: Install OpenJDK
-      uses: actions/setup-java@v5
-      with:
-        distribution: 'zulu'
-        java-version: '8'
+      - name: Configure Java
+        run: |
+          echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-11-openjdk-amd64/bin" >> "$GITHUB_PATH"
+          java -version
 
-    - name: Setup SSH Keys
-      if: ${{ startsWith(github.event.inputs.MANIFEST_URL, 'git@github.com') }}
-      uses: webfactory/ssh-agent@v0.10.0
-      with:
-          ssh-private-key: |
-              ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Install Repo
+        run: |
+          mkdir -p "$HOME/bin"
 
-    - name: Install repo
-      run: |
-        sudo ln -sf /usr/bin/python3 /usr/bin/python
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
-      
-    - name: Initialize repo
-      run: |
-        mkdir android-recovery
-        cd android-recovery
-        echo "android-recovery-folder=$(pwd)" >> $GITHUB_OUTPUT
-        git config --global user.name "${{ github.actor }}"
-        git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-        repo init --depth=1 -u ${{ inputs.MANIFEST_URL }} -b ${{ inputs.MANIFEST_BRANCH }}
-      id: pwd
-          
-    - name: Repo Sync
-      run: |
-        repo sync -j$(nproc --all) --force-sync
-      working-directory: android-recovery
-      
-    - name: Clone device tree
-      run: |
-        git clone ${{ inputs.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.DEVICE_PATH }}
-      working-directory: ${{ steps.pwd.outputs.android-recovery-folder }}
+          curl -fsSL \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
 
-#    - name: Clone common tree
-#      if: |
-#        inputs.COMMON_TREE_URL != null
-#        && inputs.COMMON_PATH != null
-#      run: |
-#        git clone ${{ inputs.COMMON_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ inputs.COMMON_PATH }}
-#      working-directory: ${{ steps.pwd.outputs.android-recovery-folder }}
+          chmod +x "$HOME/bin/repo"
 
-    - name: Sync Device Dependencies
-      run: |
-        bash ${GITHUB_WORKSPACE}/scripts/convert.sh ${{ inputs.DEVICE_PATH }}/${{ steps.buildtree.outputs.value }}.dependencies
-        repo sync -j$(nproc --all)
-      working-directory: ${{ steps.pwd.outputs.android-recovery-folder }}
-      continue-on-error: true
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
-#    - name: Set Swap Space
-#      uses: pierotofy/set-swap-space@master
-#      with:
-#        swap-size-gb: 12
+      - name: Initialize SHRP source
+        run: |
+          mkdir android-recovery
+          cd android-recovery
 
-    - name: Switch to Python2
-      run: |
-        sudo rm -f /usr/bin/python /usr/bin/python3.6 /usr/bin/python3.6m /usr/local/bin/python
-        sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-      continue-on-error: true
-    
-    - name: Building recovery
-      shell: bash
-      run: |
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ inputs.MAKEFILE_NAME }}-eng && make clean && make recoveryimage -j$(nproc --all)
-      working-directory: ${{ steps.pwd.outputs.android-recovery-folder }}
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
 
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v3
-      with:
-        files: | 
-          ${{ env.OUTPUT_DIR}}/${{ inputs.DEVICE_NAME }}/recovery.img
-          ${{ env.OUTPUT_DIR}}/${{ inputs.DEVICE_NAME }}/*.zip
-          ${{ env.OUTPUT_DIR}}/${{ inputs.DEVICE_NAME }}/*vendor*.img
-        name: ${{ inputs.DEVICE_NAME }}-${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Manifest: ${{ inputs.MANIFEST_BRANCH }}
-          Device: ${{ inputs.DEVICE_NAME }}
-          Device tree & Branch: ${{ inputs.DEVICE_TREE_URL }} - ${{ inputs.DEVICE_TREE_BRANCH }}
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          repo init \
+            --depth=1 \
+            -u "$MANIFEST_URL" \
+            -b "$MANIFEST_BRANCH"
 
-    - name: Run LDCheck
-      if: inputs.LDCHECK == true
-      run: |
-        cd tools
-        mv -n libneeds ${GITHUB_WORKSPACE}/${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root/
-        mv -n ldcheck ${GITHUB_WORKSPACE}/${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root/
-        cd ${GITHUB_WORKSPACE}/${{ env.OUTPUT_DIR }}/${{ inputs.DEVICE_NAME }}/recovery/root
-        python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ inputs.LDCHECKPATH }}
-        echo "Done checking missing dependencies. Review, and reconfigure your tree."
-      continue-on-error: true
+      - name: Sync SHRP source
+        working-directory: android-recovery
+        run: |
+          repo sync \
+            -c \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags \
+            -j2
+
+      - name: Verify device tree access
+        run: |
+          git ls-remote \
+            "$DEVICE_TREE_URL" \
+            "refs/heads/$DEVICE_TREE_BRANCH"
+
+      - name: Clone Bluejay device tree
+        working-directory: android-recovery
+        run: |
+          set -e
+
+          mkdir -p device/google
+
+          git clone \
+            --depth=1 \
+            --single-branch \
+            --branch "$DEVICE_TREE_BRANCH" \
+            "$DEVICE_TREE_URL" \
+            "$DEVICE_PATH"
+
+          test -f "$DEVICE_PATH/AndroidProducts.mk"
+          test -f "$DEVICE_PATH/omni_bluejay.mk"
+          test -f "$DEVICE_PATH/BoardConfig.mk"
+
+          echo "Bluejay tree cloned successfully"
+
+      - name: Check recovery configuration
+        working-directory: android-recovery
+        run: |
+          set -e
+
+          echo "Checking Pixel 6a recovery configuration"
+
+          if ! grep -Eq \
+            'BOARD_MOVE_RECOVERY_RESOURCES_TO_VENDOR_BOOT[[:space:]]*:?=[[:space:]]*true' \
+            "$DEVICE_PATH/BoardConfig.mk"; then
+
+            echo "::error::Device tree does not configure recovery resources for vendor_boot."
+            echo "A compatible Pixel 6a device tree is required."
+            exit 1
+          fi
+
+          echo "vendor_boot recovery configuration detected"
+
+      - name: Build SHRP recovery
+        working-directory: android-recovery
+        shell: bash
+        run: |
+          set -e
+
+          source build/envsetup.sh
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+
+          lunch "${PRODUCT}-eng"
+
+          mka vendorbootimage -j2
+
+      - name: Verify vendor_boot image
+        working-directory: android-recovery
+        run: |
+          set -e
+
+          mkdir -p release
+
+          IMAGE="$OUT_DIR/vendor_boot.img"
+
+          if [ ! -f "$IMAGE" ]; then
+            echo "::error::vendor_boot.img was not generated"
+            find "$OUT_DIR" -maxdepth 2 -type f
+            exit 1
+          fi
+
+          cp "$IMAGE" release/vendor_boot-bluejay-shrp.img
+
+          ls -lh release/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHRP-Bluejay-Recovery
+          path: android-recovery/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: shrp-bluejay-${{ github.run_number }}
+          name: SHRP Bluejay Build ${{ github.run_number }}
+          prerelease: true
+          files: android-recovery/release/*
+          body: |
+            SHRP Recovery Build
+
+            Device: Google Pixel 6a
+            Codename: bluejay
+            Source: SHRP Reborn
+            Branch: shrp-12.1
+            Device tree: google/bluejay
+
+            Output: vendor_boot.img
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
