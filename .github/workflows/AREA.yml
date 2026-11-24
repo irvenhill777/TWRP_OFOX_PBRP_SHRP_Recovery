@@ -1,0 +1,67 @@
+
+name: AERA Recovery [AERA]
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANIFEST_BRANCH:
+        description: 'AERA Manifest Branch'
+        required: true
+        default: 'aera-16.0'
+        type: choice
+        options:
+        - aera-16.0
+      DEVICE_TREE:
+        description: 'Custom Recovery Tree' # Replace with your Pixel 6a recovery tree repo URL
+        required: true
+        default: 'https://github.com'
+      DEVICE_TREE_BRANCH:
+        description: 'Custom Recovery Tree Branch' # Make sure this matches your repo branch (e.g., main, twrp-16.0, AERA)
+        required: true
+        default: 'main'
+      DEVICE_PATH:
+        description: 'DEVICE_PATH'
+        required: true
+        default: 'device/google/bluejay'
+      DEVICE_NAME:
+        description: 'DEVICE_NAME'
+        required: true
+        default: 'bluejay'
+      MAKEFILE_NAME:
+        description: 'MAKEFILE_NAME (excluding .mk extension, Example: twrp_bluejay)'
+        required: true
+        default: 'twrp_bluejay'
+      RELEASE:
+        description: 'Android build release used by lunch (bp2a for Android 16)'
+        required: true
+        default: 'bp2a'
+      BUILD_TYPE:
+        description: 'Build variant used by lunch'
+        required: true
+        default: 'eng'
+        type: choice
+        options:
+        - eng
+        - userdebug
+      BUILD_TARGET:
+        description: 'Specify your Build Target' # Pixel 6a uses vendorboot for recovery
+        required: true
+        default: 'vendorboot'
+        type: choice
+        options:
+        - boot
+        - recovery
+        - vendorboot
+      LDCHECK:
+        description: 'Use LDCHECK'
+        required: false
+        default: 'false'
+        type: boolean
+      LDCHECKPATH:
+        description: 'Path of blobs to check' # Updated from Qualcomm qseecomd to generic KeyMint/Gatekeeper path
+        required: true
+        default: 'vendor/bin/hw'
+
+jobs:
+  build:
+    name: Build AERA by ${{ github.actor }}
