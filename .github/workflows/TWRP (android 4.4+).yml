@@ -1,123 +1,138 @@
 
-name: Pixel 6a Bluejay Recovery Build
+name: SHRP Recovery Builder - Pixel 6a Bluejay
+
+on:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-on:
-  workflow_dispatch:
-    inputs:
-      MANIFEST_URL:
-        description: TWRP manifest repository
-        required: true
-        default: https://github.com/mlm-games/platform_manifest_twrp_omni
-
-      MANIFEST_BRANCH:
-        description: Compatible TWRP manifest branch
-        required: true
-        default: twrp-5.1
-
-      DEVICE_TREE_URL:
-        description: Pixel 6a device tree
-        required: true
-        default: https://github.com/twrpdtgen/android_device_google_bluejay
-
-      DEVICE_TREE_BRANCH:
-        description: Device tree branch
-        required: true
-        default: bluejay_beta-user-UpsideDownCake-UPP2.230217.004-9663077-release-keys
-
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
 
     env:
       DEVICE: bluejay
       DEVICE_PATH: device/google/bluejay
       PRODUCT: omni_bluejay
       OUT_DIR: out/target/product/bluejay
+
+      MANIFEST_URL: https://github.com/SHRP-Reborn/manifest.git
+      MANIFEST_BRANCH: shrp-12.1
+
+      DEVICE_TREE_URL: https://github.com/twrpdtgen/android_device_google_bluejay.git
+      DEVICE_TREE_BRANCH: bluejay_beta-user-UpsideDownCake-UPP2.230217.004-9663077-release-keys
+
       LC_ALL: C.UTF-8
+      ALLOW_MISSING_DEPENDENCIES: "true"
 
     steps:
-      - name: Checkout workflow
+      - name: Checkout builder
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache curl flex \
-            g++-multilib gcc-multilib git git-lfs gnupg \
-            gperf imagemagick lib32ncurses-dev lib32z1-dev \
-            liblz4-tool libncurses-dev libsdl1.2-dev \
-            libssl-dev libxml2 libxml2-utils lzop \
-            pngcrush rsync schedtool squashfs-tools \
-            xsltproc zip zlib1g-dev python3 python-is-python3 \
-            openjdk-17-jdk
+            bc bison build-essential ccache curl \
+            flex g++-multilib gcc-multilib git \
+            git-lfs gnupg gperf imagemagick \
+            lib32ncurses-dev lib32z1-dev \
+            liblz4-tool libncurses-dev \
+            libssl-dev libxml2 libxml2-utils \
+            lzop pngcrush rsync schedtool \
+            squashfs-tools xsltproc zip \
+            zlib1g-dev python3 python-is-python3 \
+            openjdk-11-jdk
 
       - name: Configure Java
         run: |
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-11-openjdk-amd64/bin" >> "$GITHUB_PATH"
           java -version
 
-      - name: Install Repo tool
+      - name: Install Repo
         run: |
           mkdir -p "$HOME/bin"
+
           curl -fsSL \
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o "$HOME/bin/repo"
+
           chmod +x "$HOME/bin/repo"
+
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Initialize TWRP source
+      - name: Initialize SHRP source
         run: |
-          mkdir -p android-recovery
+          mkdir android-recovery
           cd android-recovery
 
           git config --global user.name "GitHub Actions"
-          git config --global user.email \
-            "actions@github.com"
+          git config --global user.email "actions@github.com"
 
           repo init \
             --depth=1 \
-            -u "${{ inputs.MANIFEST_URL }}" \
-            -b "${{ inputs.MANIFEST_BRANCH }}"
+            -u "$MANIFEST_URL" \
+            -b "$MANIFEST_BRANCH"
 
-      - name: Sync source
+      - name: Sync SHRP source
         working-directory: android-recovery
         run: |
           repo sync \
             -c \
-            -j2 \
             --force-sync \
-            --no-clone-bundle
+            --no-clone-bundle \
+            --no-tags \
+            -j2
+
+      - name: Verify device tree access
+        run: |
+          git ls-remote \
+            "$DEVICE_TREE_URL" \
+            "refs/heads/$DEVICE_TREE_BRANCH"
 
       - name: Clone Bluejay device tree
         working-directory: android-recovery
         run: |
+          set -e
+
           mkdir -p device/google
 
           git clone \
             --depth=1 \
             --single-branch \
-            -b "${{ inputs.DEVICE_TREE_BRANCH }}" \
-            "${{ inputs.DEVICE_TREE_URL }}" \
-            "${{ env.DEVICE_PATH }}"
+            --branch "$DEVICE_TREE_BRANCH" \
+            "$DEVICE_TREE_URL" \
+            "$DEVICE_PATH"
 
-          test -f "${{ env.DEVICE_PATH }}/AndroidProducts.mk"
-          test -f "${{ env.DEVICE_PATH }}/${{ env.PRODUCT }}.mk"
+          test -f "$DEVICE_PATH/AndroidProducts.mk"
+          test -f "$DEVICE_PATH/omni_bluejay.mk"
+          test -f "$DEVICE_PATH/BoardConfig.mk"
 
-      - name: Check build target
+          echo "Bluejay tree cloned successfully"
+
+      - name: Check recovery configuration
         working-directory: android-recovery
         run: |
-          echo "Device: $DEVICE"
-          echo "Product: $PRODUCT"
-          echo "Device tree: $DEVICE_PATH"
+          set -e
 
-          grep -R "omni_bluejay" "$DEVICE_PATH" || true
+          echo "Checking Pixel 6a recovery configuration"
 
-      - name: Build recovery
+          if ! grep -Eq \
+            'BOARD_MOVE_RECOVERY_RESOURCES_TO_VENDOR_BOOT[[:space:]]*:?=[[:space:]]*true' \
+            "$DEVICE_PATH/BoardConfig.mk"; then
+
+            echo "::error::Device tree does not configure recovery resources for vendor_boot."
+            echo "A compatible Pixel 6a device tree is required."
+            exit 1
+          fi
+
+          echo "vendor_boot recovery configuration detected"
+
+      - name: Build SHRP recovery
         working-directory: android-recovery
         shell: bash
         run: |
@@ -129,46 +144,51 @@ jobs:
 
           lunch "${PRODUCT}-eng"
 
-          mka recoveryimage -j2
+          mka vendorbootimage -j2
 
-      - name: Verify build output
+      - name: Verify vendor_boot image
         working-directory: android-recovery
         run: |
+          set -e
+
           mkdir -p release
 
-          find "$OUT_DIR" -maxdepth 1 -type f \
-            \( -name "recovery.img" \
-            -o -name "vendor_boot.img" \
-            -o -name "boot.img" \
-            -o -name "*.zip" \) \
-            -exec cp -v {} release/ \;
+          IMAGE="$OUT_DIR/vendor_boot.img"
 
-          test -n "$(find release -type f -print -quit)"
+          if [ ! -f "$IMAGE" ]; then
+            echo "::error::vendor_boot.img was not generated"
+            find "$OUT_DIR" -maxdepth 2 -type f
+            exit 1
+          fi
 
-          echo "Build artifacts:"
+          cp "$IMAGE" release/vendor_boot-bluejay-shrp.img
+
           ls -lh release/
 
-      - name: Upload build artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bluejay-recovery-${{ github.run_number }}
+          name: SHRP-Bluejay-Recovery
           path: android-recovery/release/*
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: bluejay-${{ github.run_number }}
-          name: Bluejay Recovery Build ${{ github.run_number }}
+          tag_name: shrp-bluejay-${{ github.run_number }}
+          name: SHRP Bluejay Build ${{ github.run_number }}
           prerelease: true
           files: android-recovery/release/*
           body: |
-            Google Pixel 6a (bluejay)
+            SHRP Recovery Build
 
-            Manifest: ${{ inputs.MANIFEST_BRANCH }}
-            Device: bluejay
-            Product: omni_bluejay
-            Device tree: ${{ inputs.DEVICE_TREE_URL }}
-            Device branch: ${{ inputs.DEVICE_TREE_BRANCH }}
+            Device: Google Pixel 6a
+            Codename: bluejay
+            Source: SHRP Reborn
+            Branch: shrp-12.1
+            Device tree: google/bluejay
+
+            Output: vendor_boot.img
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
