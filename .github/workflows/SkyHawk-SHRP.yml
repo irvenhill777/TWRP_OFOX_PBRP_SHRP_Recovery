@@ -1,87 +1,42 @@
-name: SkyHawk SHRP - Google Pixel 6a
+
+name: SkyHawk SHRP - Google Pixel 6a (bluejay)
 
 on:
   workflow_dispatch:
-    inputs:
-      MANIFEST:
-        description: SHRP manifest
-        required: true
-        default: [github.com](https://github.com/SHRP-Reborn/manifest.git)
 
-      MANIFEST_BRANCH:
-        description: SHRP manifest branch
-        required: true
-        default: shrp-12.1
-
-      DEVICE_TREE:
-        description: Pixel 6a SHRP/TWRP device tree
-        required: true
-        default: REPLACE_WITH_BLUEJAY_RECOVERY_TREE
-
-      DEVICE_TREE_BRANCH:
-        description: Device tree branch
-        required: true
-        default: android-12.1
-
-      DEVICE_PATH:
-        description: Device tree destination
-        required: true
-        default: device/google/bluejay
-
-      DEVICE_NAME:
-        description: Device codename
-        required: true
-        default: bluejay
-
-      DEVICE_MAKEFILE:
-        description: Recovery product makefile
-        required: true
-        default: twrp_bluejay
-
-      BUILD_TARGET:
-        description: Recovery build target
-        required: true
-        type: choice
-        default: boot
-        options:
-          - boot
-          - vendorboot
-          - recovery
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build SHRP for Pixel 6a
+    name: Build SHRP boot image for Pixel 6a
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
-    permissions:
-      contents: read
-
     env:
-      DEVICE: ${{ inputs.DEVICE_NAME }}
-      DEVICE_PATH: ${{ inputs.DEVICE_PATH }}
-      OUTPUT_DIR: android-recovery/out/target/product/${{ inputs.DEVICE_NAME }}
-      CCACHE_EXEC: /usr/bin/ccache
+      DEVICE: bluejay
+      DEVICE_PATH: device/google/bluejay
+      PRODUCT: omni_bluejay
+      MANIFEST_URL: https://github.com/SHRP-Reborn/manifest.git
+      MANIFEST_BRANCH: shrp-12.1
+      DEVICE_TREE_URL: https://github.com/twrpdtgen/android_device_google_bluejay.git
+      DEVICE_TREE_BRANCH: bluejay_beta-user-UpsideDownCake-UPP2.230217.004-9663077-release-keys
+      OUTPUT_DIR: android-recovery/out/target/product/bluejay
       USE_CCACHE: "1"
-      CCACHE_COMPRESS: "1"
       ALLOW_MISSING_DEPENDENCIES: "true"
 
     steps:
       - name: Checkout builder
         uses: actions/checkout@v4
 
-      - name: Display build information
+      - name: Display build configuration
         run: |
-          echo "================================"
           echo "Device: Google Pixel 6a"
-          echo "Codename: ${{ inputs.DEVICE_NAME }}"
-          echo "Manifest: ${{ inputs.MANIFEST }}"
-          echo "Manifest branch: ${{ inputs.MANIFEST_BRANCH }}"
-          echo "Device tree: ${{ inputs.DEVICE_TREE }}"
-          echo "Device branch: ${{ inputs.DEVICE_TREE_BRANCH }}"
-          echo "Device path: ${{ inputs.DEVICE_PATH }}"
-          echo "Build target: ${{ inputs.BUILD_TARGET }}"
-          echo "================================"
+          echo "Codename: $DEVICE"
+          echo "Product: $PRODUCT"
+          echo "Manifest: $MANIFEST_URL ($MANIFEST_BRANCH)"
+          echo "Device tree: $DEVICE_TREE_URL ($DEVICE_TREE_BRANCH)"
+          echo "Build target: bootimage"
 
       - name: Free disk space
         uses: rokibhasansagar/slimhub_actions@main
@@ -95,38 +50,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            ccache \
-            curl \
-            flex \
-            g++-multilib \
-            gcc-multilib \
-            git \
-            git-lfs \
-            gnupg \
-            gperf \
-            imagemagick \
-            lib32ncurses-dev \
-            lib32readline-dev \
-            lib32z1-dev \
-            libelf-dev \
-            liblz4-tool \
-            libncurses-dev \
-            libssl-dev \
-            libxml2-utils \
-            lzop \
-            pngcrush \
-            python3 \
-            python-is-python3 \
-            rsync \
-            schedtool \
-            squashfs-tools \
-            unzip \
-            wget \
-            zip \
-            zlib1g-dev
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git git-lfs gnupg gperf imagemagick lib32ncurses-dev lib32readline-dev \
+            lib32z1-dev libelf-dev liblz4-tool libncurses-dev libssl-dev \
+            libxml2-utils lzop pngcrush python3 python-is-python3 rsync \
+            schedtool squashfs-tools unzip wget zip zlib1g-dev
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -137,19 +65,14 @@ jobs:
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: shrp-bluejay-${{ inputs.MANIFEST_BRANCH }}
-          restore-keys: |
-            shrp-bluejay-
+          key: shrp-bluejay-shrp-12.1
+          restore-keys: shrp-bluejay-
           max-size: 10G
 
       - name: Install repo tool
         run: |
           mkdir -p "$HOME/bin"
-
-          curl -fL \
-            [storage.googleapis.com](https://storage.googleapis.com/git-repo-downloads/repo) \
-            -o "$HOME/bin/repo"
-
+          curl -fL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
@@ -157,121 +80,78 @@ jobs:
         run: |
           mkdir -p android-recovery
           cd android-recovery
-
           git config --global user.name "Pixel 6a SHRP Builder"
-          git config --global user.email \
-            "bluejay-builder@users.noreply.github.com"
-
-          repo init \
-            --depth=1 \
-            -u "${{ inputs.MANIFEST }}" \
-            -b "${{ inputs.MANIFEST_BRANCH }}"
+          git config --global user.email "bluejay-builder@users.noreply.github.com"
+          repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH"
 
       - name: Sync SHRP source
         run: |
           cd android-recovery
-
-          repo sync \
-            -c \
-            -j2 \
-            --force-sync \
-            --no-clone-bundle \
-            --no-tags
+          repo sync -c -j2 --force-sync --no-clone-bundle --no-tags
 
       - name: Clone Pixel 6a device tree
         run: |
           cd android-recovery
-
-          rm -rf "${{ inputs.DEVICE_PATH }}"
-          mkdir -p "$(dirname "${{ inputs.DEVICE_PATH }}")"
-
-          git clone \
-            --depth=1 \
-            --single-branch \
-            -b "${{ inputs.DEVICE_TREE_BRANCH }}" \
-            "${{ inputs.DEVICE_TREE }}" \
-            "${{ inputs.DEVICE_PATH }}"
-
-          cd "${{ inputs.DEVICE_PATH }}"
-          echo "DEVICE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          rm -rf "$DEVICE_PATH"
+          mkdir -p "$(dirname "$DEVICE_PATH")"
+          git clone --depth=1 --single-branch -b "$DEVICE_TREE_BRANCH" \
+            "$DEVICE_TREE_URL" "$DEVICE_PATH"
+          echo "Device tree commit: $(git -C "$DEVICE_PATH" rev-parse HEAD)"
 
       - name: Verify Pixel 6a device tree
         run: |
-          TREE="android-recovery/${{ inputs.DEVICE_PATH }}"
+          TREE="android-recovery/$DEVICE_PATH"
 
-          test -f "$TREE/BoardConfig.mk"
-          test -f "$TREE/AndroidProducts.mk"
-
-          PRODUCT="${{ inputs.DEVICE_MAKEFILE }}"
-
-          if [ ! -f "$TREE/$PRODUCT.mk" ]; then
-            echo "::error::Missing $TREE/$PRODUCT.mk"
-            echo "Available product makefiles:"
-            find "$TREE" -maxdepth 1 -name "*.mk" -print
+          test -f "$TREE/BoardConfig.mk" || {
+            echo "::error::BoardConfig.mk is missing."
             exit 1
-          fi
-
-          grep -q "$PRODUCT" "$TREE/AndroidProducts.mk" || {
-            echo "::warning::$PRODUCT is not listed literally in AndroidProducts.mk."
           }
 
-          echo "Pixel 6a device tree verified."
+          test -f "$TREE/AndroidProducts.mk" || {
+            echo "::error::AndroidProducts.mk is missing."
+            exit 1
+          }
 
-      - name: Set build command
-        run: |
-          case "${{ inputs.BUILD_TARGET }}" in
-            boot)
-              echo "BUILD_COMMAND=bootimage" >> "$GITHUB_ENV"
-              echo "OUTPUT_IMAGE=boot.img" >> "$GITHUB_ENV"
-              ;;
+          test -f "$TREE/omni_bluejay.mk" || {
+            echo "::error::omni_bluejay.mk is missing."
+            exit 1
+          }
 
-            vendorboot)
-              echo "BUILD_COMMAND=vendorbootimage" >> "$GITHUB_ENV"
-              echo "OUTPUT_IMAGE=vendor_boot.img" >> "$GITHUB_ENV"
-              ;;
+          grep -Eq 'BOARD_USES_RECOVERY_AS_BOOT[[:space:]]*:?=[[:space:]]*true' "$TREE/BoardConfig.mk" || {
+            echo "::error::Expected bluejay recovery-as-boot configuration."
+            exit 1
+          }
 
-            recovery)
-              echo "BUILD_COMMAND=recoveryimage" >> "$GITHUB_ENV"
-              echo "OUTPUT_IMAGE=recovery.img" >> "$GITHUB_ENV"
-              ;;
+          grep -q 'omni_bluejay' "$TREE/AndroidProducts.mk" || {
+            echo "::error::omni_bluejay is not listed in AndroidProducts.mk."
+            exit 1
+          }
 
-            *)
-              echo "::error::Unsupported build target."
-              exit 1
-              ;;
-          esac
+          grep -q 'TARGET_BOARD_PLATFORM.*gs101' "$TREE/BoardConfig.mk" || {
+            echo "::error::Expected Google Tensor gs101 platform configuration."
+            exit 1
+          }
 
-      - name: Set up build environment
-        run: |
-          cd android-recovery
+          echo "Pixel 6a device tree checks passed."
 
-          source build/envsetup.sh
-          lunch "${{ inputs.DEVICE_MAKEFILE }}-eng"
-
-      - name: Build SkyHawk Recovery
+      - name: Build SkyHawk Recovery boot image
         run: |
           cd android-recovery
-
           export ALLOW_MISSING_DEPENDENCIES=true
           export USE_CCACHE=1
 
           source build/envsetup.sh
-          lunch "${{ inputs.DEVICE_MAKEFILE }}-eng"
+          lunch omni_bluejay-eng
+          mka bootimage -j2
 
-          mka "$BUILD_COMMAND" -j2
-
-      - name: Verify recovery artifact
+      - name: Verify and checksum boot image
         run: |
-          IMAGE="$OUTPUT_DIR/$OUTPUT_IMAGE"
+          IMAGE="$OUTPUT_DIR/boot.img"
 
           if [ ! -f "$IMAGE" ]; then
-            echo "::error::Expected image was not generated: $IMAGE"
-            echo "Images found in output directory:"
-            find "$OUTPUT_DIR" \
-              -maxdepth 1 \
-              -type f \
-              \( -name "*.img" -o -name "*.zip" \) \
-              -print || true
+            echo "::error::boot.img was not generated at $IMAGE"
+            echo "Available image files:"
+            find "$OUTPUT_DIR" -maxdepth 2 -type f -name "*.img" -print 2>/dev/null || true
             exit 1
           fi
 
@@ -279,14 +159,14 @@ jobs:
           md5sum "$IMAGE" | tee "$IMAGE.md5"
           ls -lh "$IMAGE" "$IMAGE.sha256" "$IMAGE.md5"
 
-      - name: Upload Pixel 6a recovery artifacts
+      - name: Upload Pixel 6a boot image
         uses: actions/upload-artifact@v4
         with:
-          name: SHRP-Pixel-6a-bluejay-${{ inputs.BUILD_TARGET }}
+          name: SHRP-Pixel-6a-bluejay-boot
           path: |
-            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}
-            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}.sha256
-            ${{ env.OUTPUT_DIR }}/${{ env.OUTPUT_IMAGE }}.md5
+            ${{ env.OUTPUT_DIR }}/boot.img
+            ${{ env.OUTPUT_DIR }}/boot.img.sha256
+            ${{ env.OUTPUT_DIR }}/boot.img.md5
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
