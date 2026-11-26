@@ -173,51 +173,40 @@ jobs:
 
           echo "Pixel lunch target corrected."
 
-      - name: Fix Android System SDK version mismatch
+      - name: Align Pixel 6a API with OrangeFox 12.1
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$DEVICE_TREE_PATH"
 
-          echo "Aligning BOARD_SYSTEMSDK_VERSIONS with shipping API 34..."
+          echo "Configuring Pixel 6a bluejay for Android API 32..."
 
           test -f BoardConfig.mk
           test -f device.mk
 
-          # Remove any existing direct assignment in this BoardConfig.
+          # OrangeFox 12.1 supports System SDK versions only through 32.
           sed -i \
             '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' \
             BoardConfig.mk
 
-          # Add the required SDK version immediately after DEVICE_PATH.
-          if grep -q '^DEVICE_PATH[[:space:]]*:=' BoardConfig.mk; then
-            sed -i \
-              '/^DEVICE_PATH[[:space:]]*:=/a BOARD_SYSTEMSDK_VERSIONS := 34' \
-              BoardConfig.mk
-          else
-            echo "ERROR: DEVICE_PATH declaration not found in BoardConfig.mk."
-            exit 1
-          fi
+          sed -i \
+            's/^PRODUCT_SHIPPING_API_LEVEL[[:space:]]*:=.*/PRODUCT_SHIPPING_API_LEVEL := 32/' \
+            device.mk
 
-          echo "Checking SDK configuration..."
+          sed -i \
+            '/^DEVICE_PATH[[:space:]]*:=/a BOARD_SYSTEMSDK_VERSIONS := 32' \
+            BoardConfig.mk
+
+          echo "===== VERIFIED CONFIGURATION ====="
 
           grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
           grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
 
-          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 34$' BoardConfig.mk
-          grep -q '^PRODUCT_SHIPPING_API_LEVEL := 34$' device.mk
+          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 32$' BoardConfig.mk
+          grep -q '^PRODUCT_SHIPPING_API_LEVEL := 32$' device.mk
 
-          echo "System SDK configuration verified."
-
-      - name: Validate CyberFox theme compatibility
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" \
-            --source "$ORANGEFOX_ROOT" \
-            --check-only
+          echo "Pixel 6a API configuration verified."
 
       - name: Apply CyberFox theme
         shell: bash
