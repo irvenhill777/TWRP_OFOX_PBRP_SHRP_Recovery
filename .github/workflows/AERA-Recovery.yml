@@ -158,6 +158,22 @@ jobs:
         done
         echo "Patched graphics_drm.cpp: $(wc -l < "$target") lines"
 
+    - name: Apply Mali gpu_renderer.cpp
+      run: |
+        set -euo pipefail
+        # AERA's GPU path is hardcoded to Adreno. If the device tree ships a Mali
+        # version of gpu_renderer.cpp, use it. Trees without it build as before.
+        src="${{ env.AERA_ROOT }}/${{ inputs.DEVICE_PATH }}/patches/aera/gpu_renderer.cpp"
+        target="${{ env.AERA_ROOT }}/bootable/recovery/aeraui/core/gpu_renderer.cpp"
+        if [ -f "$src" ]; then
+            test -f "$target" || { echo "::error::$target not found, AERA recovery layout changed"; exit 1; }
+            cp "$src" "$target"
+            grep -q libGLES_mali "$target" || { echo "::error::patched gpu_renderer.cpp has no Mali driver path"; exit 1; }
+            echo "Patched gpu_renderer.cpp: $(wc -l < "$target") lines"
+        else
+            echo "No patches/aera/gpu_renderer.cpp in the tree, keeping AERA's renderer"
+        fi
+
     - name: Allow the stock Android version in the CTS platform files
       run: |
         # build/make/core/tasks/cts.mk errors out when PLATFORM_VERSION or PLATFORM_VERSION_LAST_STABLE
