@@ -8,14 +8,14 @@ on:
         required: true
         type: choice
         options:
-          - '12.1'
-        default: '12.1'
+          - "12.1"
+        default: "12.1"
 
       DEVICE_TREE_BRANCH:
         description: Tensor Pixel device-tree branch
         required: true
         type: string
-        default: 'R12_16'
+        default: "R12_16"
 
       BUILD_TYPE:
         description: Beta keeps ADB enabled for testing; Stable disables it by design
@@ -31,10 +31,10 @@ on:
         required: true
         type: choice
         options:
-          - '2'
-          - '3'
-          - '4'
-        default: '2'
+          - "2"
+          - "3"
+          - "4"
+        default: "2"
 
 permissions:
   contents: write
@@ -105,7 +105,9 @@ jobs:
             exit 1
           fi
 
-          git clone --branch "${{ inputs.DEVICE_TREE_BRANCH }}" "$DEVICE_TREE_URL" "$DEVICE_TREE_PATH"
+          git clone --branch "${{ inputs.DEVICE_TREE_BRANCH }}" \
+            "$DEVICE_TREE_URL" \
+            "$DEVICE_TREE_PATH"
 
           grep -qx 'DEVICE=bluejay' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
           grep -qx 'FAMILY=gs101' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
@@ -257,4 +259,3 @@ jobs:
             - Package: universal AIO installer ZIP
 
             This is an unofficial test build. Verify the SHA-256 checksum and keep a known-good stock vendor_boot backup. Do not raw-flash the AIO ramdisk payload.
-```
