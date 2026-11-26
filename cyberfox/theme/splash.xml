@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<recovery>
+    <details>
+        <resolution width="1080" height="2400"/>
+        <themeversion>3</themeversion>
+    </details>
+    <resources>
+        <image name="cyberfox_logo" filename="SVG/Logos/cyberfox.svg" retainaspect="1" scale="1.0"/>
+        <image name="cyberfox_bg" filename="Splash/cyberfox_bg.svg" retainaspect="1"/>
+        <font name="cyberfox_title" filename="InterDisplay-Medium.ttf" size="70"/>
+        <font name="cyberfox_sub" filename="InterDisplay-Regular.ttf" size="42"/>
+    </resources>
+    <variables>
+        <variable name="screen_width" value="1080"/>
+        <variable name="screen_height" value="2400"/>
+        <variable name="title_y" value="%screen_h%-330"/>
+        <variable name="subtitle_y" value="%screen_h%-250"/>
+    </variables>
+    <pages>
+        <page name="splash">
+            <background color="#050D18"/>
+            <image>
+                <image resource="cyberfox_bg"/>
+                <placement x="540" y="%center_y%" placement="4"/>
+            </image>
+            <image>
+                <image resource="cyberfox_logo"/>
+                <placement x="540" y="%center_y%-160" placement="4"/>
+            </image>
+            <text style="menu_text">
+                <placement x="540" y="%title_y%" placement="4"/>
+                <font resource="cyberfox_title" color="#54D8FF"/>
+                <text>CYBERFOX</text>
+            </text>
+            <text style="menu_text">
+                <placement x="540" y="%subtitle_y%" placement="4"/>
+                <font resource="cyberfox_sub" color="#BDEEFF"/>
+                <text>BLUEJAY RECOVERY ENVIRONMENT</text>
+            </text>
+        </page>
+    </pages>
+</recovery>
