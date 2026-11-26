@@ -152,7 +152,7 @@ jobs:
 
           echo "Pixel lunch target corrected."
 
-      - name: Fix Android System SDK version for TWRP 12.1
+      - name: Validate device API configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -161,20 +161,29 @@ jobs:
           test -f BoardConfig.mk
           test -f device.mk
 
-          # TWRP 12.1's build core only accepts System SDK versions 28-32.
-          # The device shipping API level remains 34; do not change it.
-          sed -i \
-            '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' \
-            BoardConfig.mk
+          SHIPPING_API="$(sed -n 's/^PRODUCT_SHIPPING_API_LEVEL[[:space:]]*[:?+]*=[[:space:]]*//p' device.mk | tail -n1)"
+          test -n "$SHIPPING_API"
 
-          printf '\n# TWRP 12.1 supports System SDK versions only through 32.\nBOARD_SYSTEMSDK_VERSIONS := 32\n' \
-            >> BoardConfig.mk
+          # OrangeFox R12.1 must not synthesize a low API-32 System SDK
+          # configuration: the upstream Pixel device tree declares API 34.
+          if grep -Eq '^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=[[:space:]]*(28|29|30|31|32)$' BoardConfig.mk; then
+            sed -i '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' BoardConfig.mk
+          fi
 
-          grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
-          grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
+          echo "Shipping API level: $SHIPPING_API"
+          echo "Device BoardConfig.mk:"
+          grep -n 'BOARD_SYSTEMSDK_VERSIONS\|PRODUCT_SHIPPING_API_LEVEL' BoardConfig.mk device.mk || true
 
-          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 32$' BoardConfig.mk
-          grep -q '^PRODUCT_SHIPPING_API_LEVEL := 34$' device.mk
+          # The build core requires every BOARD_SYSTEMSDK_VERSIONS value to
+          # be >= PRODUCT_SHIPPING_API_LEVEL. An omitted value is valid.
+          if grep -Eq '^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=' BoardConfig.mk; then
+            while read -r sdk; do
+              if (( sdk < SHIPPING_API )); then
+                echo "ERROR: BOARD_SYSTEMSDK_VERSIONS=$sdk is below shipping API $SHIPPING_API"
+                exit 1
+              fi
+            done < <(grep -Eo 'BOARD_SYSTEMSDK_VERSIONS[^#]*' BoardConfig.mk | grep -Eo '[0-9]+')
+          fi
 
       - name: Validate CyberFox theme compatibility
         shell: bash
@@ -255,6 +264,10 @@ jobs:
             find "$DEVICE_TREE_PATH/builds" -maxdepth 2 -type f -print || true
             exit 1
           fi
+
+          for zip_file in "${${{ inputs.BUILD_JOBS }}}"; do
+            :
+          done
 
           for zip_file in "${ZIP_FILES[@]}"; do
             test -s "$zip_file"
