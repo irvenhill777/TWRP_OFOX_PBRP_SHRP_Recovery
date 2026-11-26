@@ -152,7 +152,7 @@ jobs:
 
           echo "Pixel lunch target corrected."
 
-      - name: Fix Android System SDK version mismatch
+      - name: Fix Android System SDK version for TWRP 12.1
         shell: bash
         run: |
           set -euo pipefail
@@ -161,19 +161,19 @@ jobs:
           test -f BoardConfig.mk
           test -f device.mk
 
-          # Remove direct assignments, including any earlier workflow override.
+          # TWRP 12.1's build core only accepts System SDK versions 28-32.
+          # The device shipping API level remains 34; do not change it.
           sed -i \
             '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' \
             BoardConfig.mk
 
-          # Append after the device-tree includes so this value takes precedence.
-          printf '\n# Must be >= PRODUCT_SHIPPING_API_LEVEL (34).\nBOARD_SYSTEMSDK_VERSIONS := 34\n' \
+          printf '\n# TWRP 12.1 supports System SDK versions only through 32.\nBOARD_SYSTEMSDK_VERSIONS := 32\n' \
             >> BoardConfig.mk
 
           grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
           grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
 
-          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 34$' BoardConfig.mk
+          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 32$' BoardConfig.mk
           grep -q '^PRODUCT_SHIPPING_API_LEVEL := 34$' device.mk
 
       - name: Validate CyberFox theme compatibility
@@ -242,26 +242,35 @@ jobs:
             exit 1
           fi
 
-          ZIP_FILE="$(find "$DEVICE_TREE_PATH/builds" \
-            -maxdepth 1 -type f \
-            -name "*${BUILD_NAME}*aio.zip" \
-            -print -quit)"
+          mapfile -t ZIP_FILES < <(
+            find "$DEVICE_TREE_PATH/builds" \
+              -maxdepth 1 \
+              -type f \
+              -name "*${BUILD_NAME}*aio-*.zip" \
+              -print
+          )
 
-          RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" \
-            -maxdepth 1 -type f \
-            -name "*${BUILD_NAME}*aio.ramdisk.lz4" \
-            -print -quit)"
-
-          if [ -z "$ZIP_FILE" ] || [ ! -s "$ZIP_FILE" ]; then
-            echo "ERROR: Universal AIO installer ZIP was not produced."
+          if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
+            echo "ERROR: No universal AIO installer ZIPs were produced."
             find "$DEVICE_TREE_PATH/builds" -maxdepth 2 -type f -print || true
             exit 1
           fi
 
-          cp "$ZIP_FILE" "$GITHUB_WORKSPACE/release/"
+          for zip_file in "${ZIP_FILES[@]}"; do
+            test -s "$zip_file"
+            cp "$zip_file" "$GITHUB_WORKSPACE/release/"
+          done
+
+          RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" \
+            -maxdepth 1 \
+            -type f \
+            -name "*${BUILD_NAME}*aio.ramdisk.lz4" \
+            -print -quit)"
 
           if [ -n "$RAMDISK_FILE" ] && [ -s "$RAMDISK_FILE" ]; then
             cp "$RAMDISK_FILE" "$GITHUB_WORKSPACE/release/"
+          else
+            echo "WARNING: Ramdisk payload was not produced."
           fi
 
           cd "$GITHUB_WORKSPACE/release"
