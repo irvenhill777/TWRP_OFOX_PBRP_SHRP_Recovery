@@ -124,7 +124,7 @@ jobs:
           cd "$DEVICE_TREE_PATH"
           export USE_CCACHE=1
           export CCACHE_EXEC="$(command -v ccache)"
-          bash ./build.sh -n "$BUILD_NAME" --build-type "$BUILD_TYPE" -j "$BUILD_JOBS"
+          bash ./build.sh -n "$BUILD_NAME" --build-type "$BUILD_TYPE" -j "$BUILD_JOBS" --no-patches
 
       - name: Collect and verify build outputs
         shell: bash
