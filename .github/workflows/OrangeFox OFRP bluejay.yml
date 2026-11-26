@@ -65,18 +65,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           test -f "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py"
           test -f "$GITHUB_WORKSPACE/cyberfox/theme/pages/cyberfox.xml"
           test -f "$GITHUB_WORKSPACE/cyberfox/theme/images/Splash/cyberfox_bg.svg"
           test -f "$GITHUB_WORKSPACE/cyberfox/theme/images/SVG/Logos/cyberfox.svg"
 
+          echo "CyberFox overlay files verified."
+
       - name: Prepare build environment
         shell: bash
         run: |
           set -euo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y aria2 git python3 python3-pip ccache
-          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts.git "$GITHUB_WORKSPACE/of-scripts"
+
+          sudo apt-get install -y \
+            aria2 \
+            git \
+            python3 \
+            python3-pip \
+            ccache
+
+          git clone --depth=1 \
+            https://gitlab.com/OrangeFox/misc/scripts.git \
+            "$GITHUB_WORKSPACE/of-scripts"
+
           sudo bash "$GITHUB_WORKSPACE/of-scripts/setup/android_build_env.sh"
 
       - name: Set up ccache
@@ -89,37 +103,55 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p "$GITHUB_WORKSPACE/OrangeFox"
-          git clone --depth=1 --branch master https://gitlab.com/OrangeFox/sync.git "$GITHUB_WORKSPACE/OrangeFox/sync"
+
+          git clone --depth=1 \
+            --branch master \
+            https://gitlab.com/OrangeFox/sync.git \
+            "$GITHUB_WORKSPACE/OrangeFox/sync"
+
           cd "$GITHUB_WORKSPACE/OrangeFox/sync"
-          ./orangefox_sync.sh --branch "${{ inputs.MANIFEST_BRANCH }}" --path "$ORANGEFOX_ROOT"
+
+          ./orangefox_sync.sh \
+            --branch "${{ inputs.MANIFEST_BRANCH }}" \
+            --path "$ORANGEFOX_ROOT"
 
       - name: Clone Pixel 6a Tensor device tree
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p "$(dirname "$DEVICE_TREE_PATH")"
 
           if [ -e "$DEVICE_TREE_PATH" ]; then
-            echo "ERROR: $DEVICE_TREE_PATH already exists after manifest sync."
+            echo "ERROR: Device tree path already exists."
             exit 1
           fi
 
-          git clone --branch "${{ inputs.DEVICE_TREE_BRANCH }}" \
+          git clone \
+            --branch "${{ inputs.DEVICE_TREE_BRANCH }}" \
             "$DEVICE_TREE_URL" \
             "$DEVICE_TREE_PATH"
 
-          grep -qx 'DEVICE=bluejay' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
-          grep -qx 'FAMILY=gs101' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
-
+          test -f "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
           test -f "$DEVICE_TREE_PATH/build.sh"
 
+          grep -qx 'DEVICE=bluejay' \
+            "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
+
+          grep -qx 'FAMILY=gs101' \
+            "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
+
           echo "DEVICE_TREE_COMMIT=$(git -C "$DEVICE_TREE_PATH" rev-parse HEAD)" >> "$GITHUB_ENV"
+
+          echo "Pixel device tree verified."
 
       - name: Fix Pixel device lunch target
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$DEVICE_TREE_PATH"
 
           echo "Correcting invalid bp2a lunch target..."
@@ -127,8 +159,6 @@ jobs:
           sed -i \
             's/twrp_pixels-bp2a-eng/twrp_pixels-eng/g' \
             AndroidProducts.mk build.sh
-
-          echo "Checking corrected lunch configuration..."
 
           grep -nE 'COMMON_LUNCH_CHOICES|lunch twrp_pixels' \
             AndroidProducts.mk build.sh
@@ -143,10 +173,48 @@ jobs:
 
           echo "Pixel lunch target corrected."
 
+      - name: Fix Android System SDK version mismatch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$DEVICE_TREE_PATH"
+
+          echo "Aligning BOARD_SYSTEMSDK_VERSIONS with shipping API 34..."
+
+          test -f BoardConfig.mk
+          test -f device.mk
+
+          # Remove any existing direct assignment in this BoardConfig.
+          sed -i \
+            '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' \
+            BoardConfig.mk
+
+          # Add the required SDK version immediately after DEVICE_PATH.
+          if grep -q '^DEVICE_PATH[[:space:]]*:=' BoardConfig.mk; then
+            sed -i \
+              '/^DEVICE_PATH[[:space:]]*:=/a BOARD_SYSTEMSDK_VERSIONS := 34' \
+              BoardConfig.mk
+          else
+            echo "ERROR: DEVICE_PATH declaration not found in BoardConfig.mk."
+            exit 1
+          fi
+
+          echo "Checking SDK configuration..."
+
+          grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
+          grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
+
+          grep -q '^BOARD_SYSTEMSDK_VERSIONS := 34$' BoardConfig.mk
+          grep -q '^PRODUCT_SHIPPING_API_LEVEL := 34$' device.mk
+
+          echo "System SDK configuration verified."
+
       - name: Validate CyberFox theme compatibility
         shell: bash
         run: |
           set -euo pipefail
+
           python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" \
             --source "$ORANGEFOX_ROOT" \
             --check-only
@@ -155,6 +223,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" \
             --source "$ORANGEFOX_ROOT"
 
@@ -162,19 +231,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$ORANGEFOX_ROOT"
+
           mkdir -p external
 
           if [ ! -f external/guava/Android.bp ]; then
             rm -rf external/guava
-            git clone --depth=1 --branch android-12.1.0_r18 \
+
+            git clone --depth=1 \
+              --branch android-12.1.0_r18 \
               https://android.googlesource.com/platform/external/guava \
               external/guava
           fi
 
           if [ ! -f external/gflags/Android.bp ]; then
             rm -rf external/gflags
-            git clone --depth=1 --branch android-12.1.0_r18 \
+
+            git clone --depth=1 \
+              --branch android-12.1.0_r18 \
               https://android.googlesource.com/platform/external/gflags \
               external/gflags
           fi
@@ -184,14 +259,40 @@ jobs:
 
           echo "Guava and GFlags dependencies are ready."
 
+      - name: Verify final Pixel build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$DEVICE_TREE_PATH"
+
+          echo "===== DEVICE CONFIGURATION ====="
+          cat devices/bluejay/device.conf
+
+          echo "===== LUNCH CONFIGURATION ====="
+          grep -n 'twrp_pixels' AndroidProducts.mk build.sh
+
+          echo "===== SDK CONFIGURATION ====="
+          grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
+          grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
+
+          echo "===== BUILD SCRIPT ====="
+          test -x build.sh || chmod +x build.sh
+          test -f build.sh
+
+          echo "Configuration checks passed."
+
       - name: Build universal AIO recovery package
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$DEVICE_TREE_PATH"
 
           export USE_CCACHE=1
           export CCACHE_EXEC="$(command -v ccache)"
+
+          ccache -M 10G
 
           bash ./build.sh \
             -n "$BUILD_NAME" \
@@ -203,21 +304,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p "$GITHUB_WORKSPACE/release"
 
+          if [ ! -d "$DEVICE_TREE_PATH/builds" ]; then
+            echo "ERROR: Build output directory does not exist."
+            exit 1
+          fi
+
           ZIP_FILE="$(find "$DEVICE_TREE_PATH/builds" \
-            -maxdepth 1 -type f \
+            -maxdepth 1 \
+            -type f \
             -name "OrangeFox-*-${BUILD_NAME}-aio.zip" \
             -print -quit)"
 
           RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" \
-            -maxdepth 1 -type f \
+            -maxdepth 1 \
+            -type f \
             -name "OrangeFox-*-${BUILD_NAME}-aio.ramdisk.lz4" \
             -print -quit)"
 
           if [ -z "$ZIP_FILE" ] || [ ! -s "$ZIP_FILE" ]; then
             echo "ERROR: Universal AIO installer ZIP was not produced."
-            find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -print || true
+
+            find "$DEVICE_TREE_PATH/builds" \
+              -maxdepth 2 \
+              -type f \
+              -print || true
+
             exit 1
           fi
 
@@ -228,10 +342,14 @@ jobs:
           fi
 
           cd "$GITHUB_WORKSPACE/release"
+
           sha256sum * | tee SHA256SUMS.txt
 
           echo "Build tree commit: $DEVICE_TREE_COMMIT"
           echo "Build type: $BUILD_TYPE"
+
+          echo "===== RELEASE FILES ====="
+          ls -lh
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -251,11 +369,20 @@ jobs:
           body: |
             CYBERFOX OrangeFox recovery build for Google Pixel 6a (bluejay).
 
-            - Device tree: ${{ env.DEVICE_TREE_URL }}
-            - Device tree branch: ${{ inputs.DEVICE_TREE_BRANCH }}
-            - Device tree commit: ${{ env.DEVICE_TREE_COMMIT }}
-            - OrangeFox manifest branch: ${{ inputs.MANIFEST_BRANCH }}
-            - Build type: ${{ inputs.BUILD_TYPE }}
-            - Package: universal AIO installer ZIP
+            Device: Google Pixel 6a
+            Codename: bluejay
+            SoC family: gs101
 
-            This is an unofficial test build. Verify the SHA-256 checksum and keep a known-good stock vendor_boot backup. Do not raw-flash the AIO ramdisk payload.
+            Device tree: ${{ env.DEVICE_TREE_URL }}
+            Device tree branch: ${{ inputs.DEVICE_TREE_BRANCH }}
+            Device tree commit: ${{ env.DEVICE_TREE_COMMIT }}
+
+            OrangeFox manifest branch: ${{ inputs.MANIFEST_BRANCH }}
+            Build type: ${{ inputs.BUILD_TYPE }}
+
+            Package: Universal AIO installer ZIP
+
+            This is an unofficial test build.
+            Verify the SHA-256 checksum before installation.
+            Keep a known-good stock vendor_boot backup.
+            Do not raw-flash the .ramdisk.lz4 payload.
