@@ -1,3 +1,4 @@
+```yaml
 name: CYBERFOX OrangeFox - Pixel 6a (bluejay)
 
 on:
@@ -27,7 +28,7 @@ on:
         default: Beta
 
       BUILD_JOBS:
-        description: Parallel build jobs (use 2 on standard GitHub runners)
+        description: Parallel build jobs
         required: true
         type: choice
         options:
@@ -154,13 +155,8 @@ jobs:
 
           cd "$DEVICE_TREE_PATH"
 
-          echo "Correcting invalid bp2a lunch target..."
-
           sed -i \
             's/twrp_pixels-bp2a-eng/twrp_pixels-eng/g' \
-            AndroidProducts.mk build.sh
-
-          grep -nE 'COMMON_LUNCH_CHOICES|lunch twrp_pixels' \
             AndroidProducts.mk build.sh
 
           grep -q 'twrp_pixels-eng' AndroidProducts.mk
@@ -180,12 +176,9 @@ jobs:
 
           cd "$DEVICE_TREE_PATH"
 
-          echo "Configuring Pixel 6a bluejay for Android API 32..."
-
           test -f BoardConfig.mk
           test -f device.mk
 
-          # OrangeFox 12.1 supports System SDK versions only through 32.
           sed -i \
             '/^[[:space:]]*BOARD_SYSTEMSDK_VERSIONS[[:space:]]*[:?+]*=/d' \
             BoardConfig.mk
@@ -198,15 +191,169 @@ jobs:
             '/^DEVICE_PATH[[:space:]]*:=/a BOARD_SYSTEMSDK_VERSIONS := 32' \
             BoardConfig.mk
 
-          echo "===== VERIFIED CONFIGURATION ====="
-
-          grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
-          grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
-
           grep -q '^BOARD_SYSTEMSDK_VERSIONS := 32$' BoardConfig.mk
           grep -q '^PRODUCT_SHIPPING_API_LEVEL := 32$' device.mk
 
           echo "Pixel 6a API configuration verified."
+
+      # IMPORTANT:
+      # OrangeFox 12.1 Soong does not support recovery variants for Rust
+      # binaries. Build the Rust modules as normal system binaries instead.
+      # The three required binaries are then staged into the recovery ramdisk.
+
+      - name: Fix OrangeFox 12.1 Rust recovery variant incompatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$DEVICE_TREE_PATH"
+
+          echo "Patching unsupported Rust recovery variants..."
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          rust_files = [
+              "include/recovery-pixel-boot/Android.bp",
+              "include/recovery-tensor-daemon/Android.bp",
+              "include/avbctl/Android.bp",
+              "include/ramdisk_snapshot/Android.bp",
+          ]
+
+          for rel in rust_files:
+              path = Path(rel)
+
+              if not path.is_file():
+                  sys.exit(f"ERROR: Missing Rust module file: {rel}")
+
+              data = path.read_text()
+
+              if "rust_binary {" not in data:
+                  sys.exit(f"ERROR: Expected rust_binary module in {rel}")
+
+              count = data.count("    recovery: true,")
+
+              if count > 1:
+                  sys.exit(f"ERROR: Unexpected multiple recovery properties in {rel}")
+
+              if count == 1:
+                  data = data.replace("    recovery: true,\n", "", 1)
+                  path.write_text(data)
+                  print(f"PATCHED: {rel}")
+              else:
+                  print(f"Already patched: {rel}")
+
+              if "    recovery: true," in data:
+                  sys.exit(f"ERROR: Recovery property remains in {rel}")
+
+          print("Rust module definitions patched.")
+          PY
+
+          echo "Adding Rust binaries to recovery build dependencies..."
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          board = Path("BoardConfig.mk")
+          data = board.read_text()
+
+          addition = (
+              "\n"
+              "# CYBERFOX: Build normal system Rust binaries before recovery staging.\n"
+              "INTERNAL_RECOVERYIMAGE_FILES += \\\n"
+              "    $(TARGET_OUT)/bin/fox_avbctl \\\n"
+              "    $(TARGET_OUT)/bin/recovery-pixel-boot \\\n"
+              "    $(TARGET_OUT)/bin/recovery-tensor-daemon\n"
+          )
+
+          marker = "CYBERFOX: Build normal system Rust binaries"
+
+          if marker not in data:
+              board.write_text(data + addition)
+
+          print("Recovery build dependencies configured.")
+          PY
+
+          echo "Adding Rust binary staging to build callback..."
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          callback = Path("include/prebuilt/fox_build_callback.sh")
+          data = callback.read_text()
+
+          marker = (
+              '        PRODUCT_OUT="${TARGET_DIR%/recovery/root}"\n'
+              '\n'
+              '        echo "    [PLATFORM] Injecting both keymint HALs (universal payload)"\n'
+          )
+
+          addition = r'''        # CYBERFOX: Rust binaries are built as normal system modules.
+                  # Stage them into the recovery ramdisk after Soong builds them.
+                  for rust_bin in \
+                      fox_avbctl \
+                      recovery-pixel-boot \
+                      recovery-tensor-daemon
+                  do
+                      rust_src="$PRODUCT_OUT/system/bin/$rust_bin"
+                      rust_dst="$TARGET_DIR/system/bin/$rust_bin"
+
+                      if [ ! -s "$rust_src" ]; then
+                          echo "    [RUST] ERROR: Missing system binary: $rust_src"
+                          return 1
+                      fi
+
+                      install -D -m 0755 "$rust_src" "$rust_dst"
+                      echo "    [RUST] + $rust_bin staged into recovery"
+                  done
+
+          '''
+
+          if "CYBERFOX: Rust binaries are built as normal system modules." not in data:
+              if data.count(marker) != 1:
+                  sys.exit(
+                      "ERROR: Could not uniquely locate Rust staging insertion point "
+                      "in fox_build_callback.sh."
+                  )
+
+              data = data.replace(marker, marker.replace(
+                  '        echo "    [PLATFORM] Injecting both keymint HALs (universal payload)"\n',
+                  addition + '        echo "    [PLATFORM] Injecting both keymint HALs (universal payload)"\n'
+              ), 1)
+
+              callback.write_text(data)
+
+          print("Recovery callback staging configured.")
+          PY
+
+          echo "===== VERIFY RUST PATCH ====="
+
+          for file in \
+              include/recovery-pixel-boot/Android.bp \
+              include/recovery-tensor-daemon/Android.bp \
+              include/avbctl/Android.bp \
+              include/ramdisk_snapshot/Android.bp
+          do
+              if grep -q 'recovery: true' "$file"; then
+                  echo "ERROR: Unsupported recovery property remains: $file"
+                  exit 1
+              fi
+          done
+
+          grep -q 'fox_avbctl' BoardConfig.mk
+          grep -q 'recovery-pixel-boot' BoardConfig.mk
+          grep -q 'recovery-tensor-daemon' BoardConfig.mk
+
+          grep -q 'CYBERFOX: Rust binaries are built as normal system modules.' \
+            include/prebuilt/fox_build_callback.sh
+
+          for module in fox_avbctl recovery-pixel-boot recovery-tensor-daemon; do
+              grep -q "$module" device.mk
+          done
+
+          echo "Rust compatibility patch verified."
 
       - name: Apply CyberFox theme
         shell: bash
@@ -265,9 +412,23 @@ jobs:
           grep -n 'BOARD_SYSTEMSDK_VERSIONS' BoardConfig.mk
           grep -n 'PRODUCT_SHIPPING_API_LEVEL' device.mk
 
+          echo "===== RUST MODULE CONFIGURATION ====="
+
+          for file in \
+              include/recovery-pixel-boot/Android.bp \
+              include/recovery-tensor-daemon/Android.bp \
+              include/avbctl/Android.bp \
+              include/ramdisk_snapshot/Android.bp
+          do
+              if grep -q 'recovery: true' "$file"; then
+                  echo "ERROR: Rust recovery variant remains in $file"
+                  exit 1
+              fi
+          done
+
           echo "===== BUILD SCRIPT ====="
-          test -x build.sh || chmod +x build.sh
           test -f build.sh
+          test -x build.sh || chmod +x build.sh
 
           echo "Configuration checks passed."
 
@@ -375,3 +536,4 @@ jobs:
             Verify the SHA-256 checksum before installation.
             Keep a known-good stock vendor_boot backup.
             Do not raw-flash the .ramdisk.lz4 payload.
+```
