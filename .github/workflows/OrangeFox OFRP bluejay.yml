@@ -1,0 +1,174 @@
+name: CYBERFOX OrangeFox - Pixel 6a (bluejay)
+
+on:
+  workflow_dispatch:
+    inputs:
+      MANIFEST_BRANCH:
+        description: OrangeFox manifest branch
+        required: true
+        type: choice
+        options:
+          - '12.1'
+        default: '12.1'
+      DEVICE_TREE_BRANCH:
+        description: Tensor Pixel device-tree branch
+        required: true
+        type: string
+        default: 'R12_16'
+      BUILD_TYPE:
+        description: Beta keeps ADB enabled for testing; Stable disables it by design
+        required: true
+        type: choice
+        options:
+          - Beta
+          - Stable
+        default: Beta
+      BUILD_JOBS:
+        description: Parallel build jobs (use 2 on standard GitHub runners)
+        required: true
+        type: choice
+        options:
+          - '2'
+          - '3'
+          - '4'
+        default: '2'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cyberfox-bluejay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build CYBERFOX for Pixel 6a bluejay
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      ORANGEFOX_ROOT: ${{ github.workspace }}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+      DEVICE_TREE_URL: https://github.com/leegarchat/twrp_device_google_pixels.git
+      DEVICE_TREE_PATH: ${{ github.workspace }}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/device/google/pixels
+      BUILD_NAME: CyberFox-Bluejay
+      BUILD_TYPE: ${{ inputs.BUILD_TYPE }}
+      BUILD_JOBS: ${{ inputs.BUILD_JOBS }}
+
+    steps:
+      - name: Checkout builder repository and CyberFox overlay
+        uses: actions/checkout@v4
+
+      - name: Verify CyberFox overlay files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py"
+          test -f "$GITHUB_WORKSPACE/cyberfox/theme/pages/cyberfox.xml"
+          test -f "$GITHUB_WORKSPACE/cyberfox/theme/images/Splash/cyberfox_bg.svg"
+          test -f "$GITHUB_WORKSPACE/cyberfox/theme/images/SVG/Logos/cyberfox.svg"
+
+      - name: Prepare build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y aria2 git python3 python3-pip ccache
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts.git "$GITHUB_WORKSPACE/of-scripts"
+          sudo bash "$GITHUB_WORKSPACE/of-scripts/setup/android_build_env.sh"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: cyberfox-bluejay-${{ inputs.MANIFEST_BRANCH }}-${{ inputs.DEVICE_TREE_BRANCH }}
+          max-size: 10G
+
+      - name: Sync OrangeFox source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/OrangeFox"
+          git clone --depth=1 --branch master https://gitlab.com/OrangeFox/sync.git "$GITHUB_WORKSPACE/OrangeFox/sync"
+          cd "$GITHUB_WORKSPACE/OrangeFox/sync"
+          ./orangefox_sync.sh --branch "${{ inputs.MANIFEST_BRANCH }}" --path "$ORANGEFOX_ROOT"
+
+      - name: Clone Pixel 6a Tensor device tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$DEVICE_TREE_PATH")"
+          if [ -e "$DEVICE_TREE_PATH" ]; then
+            echo "ERROR: $DEVICE_TREE_PATH already exists after manifest sync. Refusing to overwrite it."
+            exit 1
+          fi
+          git clone --branch "${{ inputs.DEVICE_TREE_BRANCH }}" "$DEVICE_TREE_URL" "$DEVICE_TREE_PATH"
+          grep -qx 'DEVICE=bluejay' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
+          grep -qx 'FAMILY=gs101' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
+          test -x "$DEVICE_TREE_PATH/build.sh" || test -f "$DEVICE_TREE_PATH/build.sh"
+          echo "DEVICE_TREE_COMMIT=$(git -C "$DEVICE_TREE_PATH" rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Validate CyberFox theme compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" --source "$ORANGEFOX_ROOT" --check-only
+
+      - name: Apply CyberFox theme
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" --source "$ORANGEFOX_ROOT"
+
+      - name: Build universal AIO recovery package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$DEVICE_TREE_PATH"
+          export USE_CCACHE=1
+          export CCACHE_EXEC="$(command -v ccache)"
+          bash ./build.sh -n "$BUILD_NAME" --build-type "$BUILD_TYPE" -j "$BUILD_JOBS"
+
+      - name: Collect and verify build outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/release"
+          ZIP_FILE="$(find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -name "OrangeFox-*-${BUILD_NAME}-aio.zip" -print -quit)"
+          RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -name "OrangeFox-*-${BUILD_NAME}-aio.ramdisk.lz4" -print -quit)"
+          if [ -z "$ZIP_FILE" ] || [ ! -s "$ZIP_FILE" ]; then
+            echo "ERROR: universal AIO installer ZIP was not produced."
+            find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -print || true
+            exit 1
+          fi
+          cp "$ZIP_FILE" "$GITHUB_WORKSPACE/release/"
+          if [ -n "$RAMDISK_FILE" ] && [ -s "$RAMDISK_FILE" ]; then
+            cp "$RAMDISK_FILE" "$GITHUB_WORKSPACE/release/"
+          fi
+          (cd "$GITHUB_WORKSPACE/release" && sha256sum * | tee SHA256SUMS.txt)
+          echo "Build tree commit: $DEVICE_TREE_COMMIT"
+          echo "Build type: $BUILD_TYPE"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CYBERFOX-Bluejay-${{ github.run_number }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CYBERFOX OrangeFox for Pixel 6a - ${{ github.run_number }}
+          tag_name: cyberfox-bluejay-${{ github.run_id }}
+          prerelease: true
+          files: release/*
+          body: |
+            CYBERFOX OrangeFox recovery build for Google Pixel 6a (bluejay).
+
+            - Device tree: ${{ env.DEVICE_TREE_URL }}
+            - Device tree branch: ${{ inputs.DEVICE_TREE_BRANCH }}
+            - Device tree commit: ${{ env.DEVICE_TREE_COMMIT }}
+            - OrangeFox manifest branch: ${{ inputs.MANIFEST_BRANCH }}
+            - Build type: ${{ inputs.BUILD_TYPE }}
+            - Package: universal AIO installer ZIP
+
+            This is an unofficial test build. Verify the SHA-256 checksum and keep a known-good stock vendor_boot backup. Do not raw-flash the AIO ramdisk payload.
