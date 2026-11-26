@@ -1,3 +1,4 @@
+```yaml
 name: CYBERFOX OrangeFox - Pixel 6a (bluejay)
 
 on:
@@ -10,11 +11,13 @@ on:
         options:
           - '12.1'
         default: '12.1'
+
       DEVICE_TREE_BRANCH:
         description: Tensor Pixel device-tree branch
         required: true
         type: string
         default: 'R12_16'
+
       BUILD_TYPE:
         description: Beta keeps ADB enabled for testing; Stable disables it by design
         required: true
@@ -23,6 +26,7 @@ on:
           - Beta
           - Stable
         default: Beta
+
       BUILD_JOBS:
         description: Parallel build jobs (use 2 on standard GitHub runners)
         required: true
@@ -45,6 +49,7 @@ jobs:
     name: Build CYBERFOX for Pixel 6a bluejay
     runs-on: ubuntu-22.04
     timeout-minutes: 360
+
     env:
       ORANGEFOX_ROOT: ${{ github.workspace }}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
       DEVICE_TREE_URL: https://github.com/leegarchat/twrp_device_google_pixels.git
@@ -95,29 +100,63 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$DEVICE_TREE_PATH")"
+
           if [ -e "$DEVICE_TREE_PATH" ]; then
-            echo "ERROR: $DEVICE_TREE_PATH already exists after manifest sync. Refusing to overwrite it."
+            echo "ERROR: $DEVICE_TREE_PATH already exists after manifest sync."
             exit 1
           fi
+
           git clone --branch "${{ inputs.DEVICE_TREE_BRANCH }}" "$DEVICE_TREE_URL" "$DEVICE_TREE_PATH"
+
           grep -qx 'DEVICE=bluejay' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
           grep -qx 'FAMILY=gs101' "$DEVICE_TREE_PATH/devices/bluejay/device.conf"
-          test -x "$DEVICE_TREE_PATH/build.sh" || test -f "$DEVICE_TREE_PATH/build.sh"
+
+          test -f "$DEVICE_TREE_PATH/build.sh"
+
           echo "DEVICE_TREE_COMMIT=$(git -C "$DEVICE_TREE_PATH" rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Fix Pixel device lunch target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$DEVICE_TREE_PATH"
+
+          echo "Correcting invalid bp2a lunch target..."
+
+          sed -i \
+            's/twrp_pixels-bp2a-eng/twrp_pixels-eng/g' \
+            AndroidProducts.mk build.sh
+
+          echo "Checking corrected lunch configuration..."
+
+          grep -nE 'COMMON_LUNCH_CHOICES|lunch twrp_pixels' \
+            AndroidProducts.mk build.sh
+
+          grep -q 'twrp_pixels-eng' AndroidProducts.mk
+          grep -q 'lunch twrp_pixels-eng' build.sh
+
+          if grep -q 'twrp_pixels-bp2a-eng' AndroidProducts.mk build.sh; then
+            echo "ERROR: Invalid bp2a lunch target remains."
+            exit 1
+          fi
+
+          echo "Pixel lunch target corrected."
 
       - name: Validate CyberFox theme compatibility
         shell: bash
         run: |
           set -euo pipefail
-          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" --source "$ORANGEFOX_ROOT" --check-only
+          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" \
+            --source "$ORANGEFOX_ROOT" \
+            --check-only
 
       - name: Apply CyberFox theme
         shell: bash
         run: |
           set -euo pipefail
-          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" --source "$ORANGEFOX_ROOT"
+          python3 "$GITHUB_WORKSPACE/cyberfox/apply-cyberfox-theme.py" \
+            --source "$ORANGEFOX_ROOT"
 
-      
       - name: Prepare missing Android build dependencies
         shell: bash
         run: |
@@ -141,6 +180,7 @@ jobs:
 
           test -f external/guava/Android.bp
           test -f external/gflags/Android.bp
+
           echo "Guava and GFlags dependencies are ready."
 
       - name: Build universal AIO recovery package
@@ -148,27 +188,47 @@ jobs:
         run: |
           set -euo pipefail
           cd "$DEVICE_TREE_PATH"
+
           export USE_CCACHE=1
           export CCACHE_EXEC="$(command -v ccache)"
-          bash ./build.sh -n "$BUILD_NAME" --build-type "$BUILD_TYPE" -j "$BUILD_JOBS" --no-patches
+
+          bash ./build.sh \
+            -n "$BUILD_NAME" \
+            --build-type "$BUILD_TYPE" \
+            -j "$BUILD_JOBS" \
+            --no-patches
 
       - name: Collect and verify build outputs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/release"
-          ZIP_FILE="$(find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -name "OrangeFox-*-${BUILD_NAME}-aio.zip" -print -quit)"
-          RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -name "OrangeFox-*-${BUILD_NAME}-aio.ramdisk.lz4" -print -quit)"
+
+          ZIP_FILE="$(find "$DEVICE_TREE_PATH/builds" \
+            -maxdepth 1 -type f \
+            -name "OrangeFox-*-${BUILD_NAME}-aio.zip" \
+            -print -quit)"
+
+          RAMDISK_FILE="$(find "$DEVICE_TREE_PATH/builds" \
+            -maxdepth 1 -type f \
+            -name "OrangeFox-*-${BUILD_NAME}-aio.ramdisk.lz4" \
+            -print -quit)"
+
           if [ -z "$ZIP_FILE" ] || [ ! -s "$ZIP_FILE" ]; then
-            echo "ERROR: universal AIO installer ZIP was not produced."
+            echo "ERROR: Universal AIO installer ZIP was not produced."
             find "$DEVICE_TREE_PATH/builds" -maxdepth 1 -type f -print || true
             exit 1
           fi
+
           cp "$ZIP_FILE" "$GITHUB_WORKSPACE/release/"
+
           if [ -n "$RAMDISK_FILE" ] && [ -s "$RAMDISK_FILE" ]; then
             cp "$RAMDISK_FILE" "$GITHUB_WORKSPACE/release/"
           fi
-          (cd "$GITHUB_WORKSPACE/release" && sha256sum * | tee SHA256SUMS.txt)
+
+          cd "$GITHUB_WORKSPACE/release"
+          sha256sum * | tee SHA256SUMS.txt
+
           echo "Build tree commit: $DEVICE_TREE_COMMIT"
           echo "Build type: $BUILD_TYPE"
 
@@ -198,3 +258,4 @@ jobs:
             - Package: universal AIO installer ZIP
 
             This is an unofficial test build. Verify the SHA-256 checksum and keep a known-good stock vendor_boot backup. Do not raw-flash the AIO ramdisk payload.
+```
